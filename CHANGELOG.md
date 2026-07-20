@@ -5,6 +5,28 @@ All notable changes to `ringotel-ns-sso` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-07-20
+
+### Added
+
+- `SSO_BLOCK_EXTS` and `SSO_BLOCK_EXTS_BY_DOMAIN` — extensions that must never gain a softphone device.
+  Unlike the soft `RINGOTEL_EXCLUDE_EXTS` rule, which gates auto-creation only and still permits heal and
+  repair, this blocks **every** device-creating path. It does not refuse the login, so an extension that
+  already has a working record keeps working. Prefix wildcards (`90*`) and per-domain `add`/`remove` are
+  supported, so "blocked everywhere except one domain" is expressible.
+
+### Changed
+
+- Widened the seeded soft-exclusion name list to `SHARED`, `SHARED VOICEMAIL`, `FAX`, `GENERAL`,
+  `VOICEMAIL`, `CONFERENCE`, `CONF RM`, `CONF ROOM`, `ROUTING`. (`SHARED VOICEMAIL` is now subsumed by
+  `VOICEMAIL` and kept only to illustrate that a more specific matcher can be listed.) These are the shapes of non-human extensions that
+  should not silently become billable app seats on first login. The matcher is substring and
+  case-insensitive, so `GENERAL` also covers "General Voicemail"; `CONFERENCE` is spelled out rather
+  than `CONF` because the short form would also match surnames, with the abbreviated room forms listed
+  explicitly. Soft means creation-only and overridable — an existing user is never blocked from
+  signing in. Override the whole list with `RINGOTEL_EXCLUDE_NAMES`; setting it **empty** disables
+  name exclusions entirely.
+
 ## [0.1.0] - 2026-07-20
 
 Initial release.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { domainAllowed, parseConfig, domainInList, ConfigError, type Env } from './config.js';
+import { domainAllowed, extBlocked, parseConfig, domainInList, ConfigError, type Env } from './config.js';
 
 const base: Env = {
   SSO_BASIC_USER: 'ringotel', SSO_BASIC_PASSWORD: 'pw',
@@ -17,7 +17,7 @@ describe('parseConfig', () => {
     expect(c.provisionDomains).toEqual([]);
     expect(c.writeIdentity).toEqual({ kind: 'api', token: 'nstoken' });
     expect(c.nsOauthServer).toBe('api.example.com'); // defaults to NS_SERVER
-    expect(c.eligibility.excludeNames).toEqual(['shared', 'shared voicemail', 'fax']);
+    expect(c.eligibility.excludeNames).toEqual(['shared', 'shared voicemail', 'voicemail', 'fax', 'general', 'conference', 'conf rm', 'conf room', 'routing']);
   });
 
   it('prefers admin OAuth identity when NS_ADMIN_USER/PASS set', () => {
@@ -183,5 +183,75 @@ describe('domainAllowed', () => {
   });
   it('an empty allowlist permits nothing, blocklist irrelevant', () => {
     expect(domainAllowed([], [], 'd.example.com')).toBe(false);
+  });
+});
+
+describe('seeded name exclusions', () => {
+  // The matcher is SUBSTRING and case-insensitive, which is why the seeded list carries the short forms:
+  // 'general' catches "General Voicemail". 'conference' is spelled out on purpose — 'conf' would also
+  // match surnames. Pinned here so the two repos' seeds can't drift apart unnoticed.
+  const seeded = parseConfig({ ...base }).eligibility.excludeNames;
+  const matches = (name: string) => seeded.some((m) => name.toLowerCase().includes(m));
+
+  it('catches the long forms via their short prefixes', () => {
+    for (const n of ['General Voicemail', 'GENERAL', 'Conference Room', 'Conf Rm 2', 'CONF ROOM B', 'Routing', 'Shared Voicemail', 'Fax Line']) {
+      expect(matches(n)).toBe(true);
+    }
+  });
+
+  it('leaves ordinary names alone', () => {
+    for (const n of ['Dana Reed', 'Sales Desk', 'Front Office']) expect(matches(n)).toBe(false);
+  });
+
+  it('an explicitly EMPTY env value means no exclusions at all, overriding the seed', () => {
+    // Not a typo-guard: "" is a deliberate opt-out, and it is why a deployment can silently end up with
+    // no name exclusions while the code still ships a sensible default.
+    expect(parseConfig({ ...base, RINGOTEL_EXCLUDE_NAMES: '' }).eligibility.excludeNames).toEqual([]);
+  });
+});
+
+describe('SSO_BLOCK_EXTS — no device, ever', () => {
+  // Distinct from the soft RINGOTEL_EXCLUDE_EXTS: that one gates auto-creation only, so a heal or a
+  // repair would still create the device. This list blocks every device-creating path.
+  const cfg = (over: Partial<Env> = {}) => parseConfig({ ...base, ...over });
+
+  it('defaults to nothing blocked', () => {
+    expect(cfg().blockExts).toEqual([]);
+    expect(cfg().blockExtsByDomain).toEqual({});
+  });
+
+  it('blocks a listed extension on any domain', () => {
+    const c = cfg({ SSO_BLOCK_EXTS: '900' });
+    expect(extBlocked('900', 'a.12345.service', c)).toBe(true);
+    expect(extBlocked('901', 'a.12345.service', c)).toBe(false);
+  });
+
+  it('supports a prefix wildcard', () => {
+    const c = cfg({ SSO_BLOCK_EXTS: '90*' });
+    expect(extBlocked('900', 'a.12345.service', c)).toBe(true);
+    expect(extBlocked('9012', 'a.12345.service', c)).toBe(true);
+    expect(extBlocked('8000', 'a.12345.service', c)).toBe(false);
+  });
+
+  it('per-domain remove permits it on exactly one domain — the whole point', () => {
+    const c = cfg({ SSO_BLOCK_EXTS: '900', SSO_BLOCK_EXTS_BY_DOMAIN: '{"one.12345.service":{"remove":["900"]}}' });
+    expect(extBlocked('900', 'one.12345.service', c)).toBe(false);
+    expect(extBlocked('900', 'other.12345.service', c)).toBe(true);
+  });
+
+  it('per-domain add blocks an extra extension on one domain only', () => {
+    const c = cfg({ SSO_BLOCK_EXTS_BY_DOMAIN: '{"one.12345.service":{"add":["8000"]}}' });
+    expect(extBlocked('8000', 'one.12345.service', c)).toBe(true);
+    expect(extBlocked('8000', 'other.12345.service', c)).toBe(false);
+  });
+
+  it('domain matching is case-insensitive', () => {
+    const c = cfg({ SSO_BLOCK_EXTS: '900', SSO_BLOCK_EXTS_BY_DOMAIN: '{"one.12345.service":{"remove":["900"]}}' });
+    expect(extBlocked('900', 'ONE.12345.SERVICE', c)).toBe(false);
+  });
+
+  it('rejects malformed JSON rather than silently blocking nothing', () => {
+    expect(() => cfg({ SSO_BLOCK_EXTS_BY_DOMAIN: 'not json' })).toThrow(/not valid JSON/);
+    expect(() => cfg({ SSO_BLOCK_EXTS_BY_DOMAIN: '{"d":{"add":"900"}}' })).toThrow(/add\/remove/);
   });
 });

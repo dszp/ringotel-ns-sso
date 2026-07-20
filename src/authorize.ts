@@ -3,7 +3,7 @@ import { evaluateEligibility, type EligUser } from '@dszp/netsapiens-lib';
 import type { Config } from './config.js';
 import { resolveOrgBranch, type OrgBranch, type OrgBranchReader } from './orgBranch.js';
 import { modeFor, decide, healPermitted } from './decide.js';
-import { domainInList, domainAllowed } from './config.js';
+import { domainInList, domainAllowed, extBlocked } from './config.js';
 import type { RepairTask } from './repair.js';
 
 /** NS device field carrying the auto-generated SIP registration password (v2). */
@@ -227,6 +227,15 @@ export async function authorize(input: AuthorizeInput, deps: AuthorizeDeps): Pro
   // healed on any provision-enabled deployment.
   const canHeal = healPermitted(domain, { heal: config.healDomains, healBlock: config.healBlockDomains });
   const decision = decide(res.verdict, mode, eligible, canHeal);
+
+  // Extension blocklist — refuses every path that would CREATE a device (provision, heal, and the
+  // post-response repair below), independently of the domain's mode. Deliberately does NOT refuse the
+  // login: barring device creation shouldn't disconnect an extension that already has a working record.
+  const blockedExt = extBlocked(ext, domain, config);
+  if (blockedExt && (decision.action === 'provision' || decision.action === 'heal')) {
+    log.action = decision.action;
+    return { status: 403, log: { ...log, outcome: 'deny', reason: 'ext-blocked' } };
+  }
   log.action = decision.action;
   log.decisionReason = decision.reason;
 
@@ -254,7 +263,7 @@ export async function authorize(input: AuthorizeInput, deps: AuthorizeDeps): Pro
     const out = success(authname);
     // An `allow` performs no writes, so a deleted upstream device is invisible here — schedule the check
     // for after the response. Requires a resolved record id: without one there is nothing to update.
-    if (res.user?.id && domainAllowed(config.repairDomains, config.repairBlockDomains, domain)) {
+    if (res.user?.id && !blockedExt && domainAllowed(config.repairDomains, config.repairBlockDomains, domain)) {
       out.repair = {
         domain,
         ext,

@@ -146,7 +146,14 @@ shape for a multi-domain deployment is a broad allowlist — usually `*` — plu
 the domains that must not be touched, rather than enumerating every permitted domain and keeping that
 list in sync as customers are added.
 
-**Every blocklist accepts `*`**, meaning "block everywhere". For provision and repair that is simply the
+**Blocking a specific extension everywhere but one domain** is the other common shape, and it needs both
+settings: put the extension in `SSO_BLOCK_EXTS`, then exempt the one domain with a `remove` entry in
+`SSO_BLOCK_EXTS_BY_DOMAIN`. Worth understanding why this is separate from the soft `RINGOTEL_EXCLUDE_EXTS`
+list: a soft exclusion only gates *auto-creation*, so a heal or a repair would still create the device on
+the reasoning that an existing record implies somebody deliberately made one. `SSO_BLOCK_EXTS` is the
+harder statement — no device here, ever — and so it gates all three write paths.
+
+**Every domain blocklist accepts `*`**, meaning "block everywhere". For provision and repair that is simply the
 inverse of an empty allowlist. For **heal** it is not redundant, and is the one genuinely useful case:
 because provision mode also heals, `SSO_HEAL_BLOCK_DOMAINS="*"` with a broad provision allowlist gives
 *create missing users, never modify existing ones* — a posture you cannot otherwise express.
@@ -206,6 +213,8 @@ genuinely different policy per customer has to run more than one Worker, at leas
 | `SSO_HEAL_BLOCK_DOMAINS` | empty | **Full NetSapiens domains**, or `*` for all. Refuses `heal` for these even when `SSO_HEAL_DOMAINS` would allow it. `*` here is **not** the same as emptying `SSO_HEAL_DOMAINS`: provision mode heals too, so `SSO_HEAL_BLOCK_DOMAINS="*"` alongside a broad provision allowlist means *create missing users, but never modify existing ones* — reactivation and sibling dedup are both refused. |
 | `SSO_PROVISION_BLOCK_DOMAINS` | empty | **Full NetSapiens domains.** Refuses `provision` for these even when `SSO_PROVISION_DOMAINS` would allow it. `*` blocks provisioning everywhere (equivalent to an empty `SSO_PROVISION_DOMAINS`). A blocked domain falls back to the next weaker mode (so blocking provisioning on a `*`-provision deployment leaves `heal`, if heal still permits it). |
 | `SSO_REPAIR_BLOCK_DOMAINS` | empty | **Full NetSapiens domains**, or `*` for all. Refuses post-response repair for these even when `SSO_REPAIR_DOMAINS` would allow it. `*` disables repair everywhere (equivalent to an empty `SSO_REPAIR_DOMAINS`). |
+| `SSO_BLOCK_EXTS` | empty | Extensions that must **never gain a softphone device**, on any domain. CSV; a trailing `*` is a prefix wildcard (`90*` covers 900, 901, 9012…). Blocks every device-creating path — `provision`, `heal`, **and** post-response `repair` — but deliberately does **not** refuse the login, so an extension that already has a working record keeps working. Distinct from `RINGOTEL_EXCLUDE_EXTS`, which is a *soft* rule gating auto-creation only and still permits heal and repair. |
+| `SSO_BLOCK_EXTS_BY_DOMAIN` | empty | JSON keyed by **full NetSapiens domain**, applying `add` then `remove` over `SSO_BLOCK_EXTS` — e.g. `{"one.12345.service": {"remove": ["900"]}}` to block an extension everywhere *except* one domain. Malformed JSON is a startup error, not a silent no-op. |
 | `SSO_DOMAIN_MAP` | empty | Optional JSON object mapping a NetSapiens domain's first DNS label to a Ringotel org key override, e.g. `{"legacy":"acme"}`. Only needed when the default (first-label-as-org-key) match doesn't hold. |
 | `RINGOTEL_EXCLUDE_NAMES` | *(see note)* | CSV of name substrings that soft-exclude a NetSapiens user from auto-provision (case-insensitive), e.g. `SHARED,SHARED VOICEMAIL,FAX`. |
 | `RINGOTEL_EXCLUDE_EXTS` | empty | CSV of specific extensions to soft-exclude from auto-provision. |

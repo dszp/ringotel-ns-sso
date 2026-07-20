@@ -551,3 +551,42 @@ describe('heal syncs the NetSapiens email faithfully, including when blank', () 
     expect((await heal({ ...baseSelf, email: 'user@example.com' })).email).toBe('user@example.com');
   });
 });
+
+describe('SSO_BLOCK_EXTS gates every device-creating path', () => {
+  const NS = { getDevices: async () => [], getDevice: async () => ({}), createDevice: async () => ({ 'device-sip-registration-password': 'sippw' }) } as any;
+  const RT = { createUser: async () => ({}), updateUser: async () => ({}), deleteUser: async () => ({}) } as any;
+  const W = { getWrite: async () => ({ rt: RT, ns: NS }) };
+
+  it('provision is refused for a blocked extension', async () => {
+    const r = await authorize(input, deps({ read: { ...orgBranchReader, getUsers: async () => [] }, ...W } as any,
+      env({ SSO_PROVISION_DOMAINS: '*', SSO_BLOCK_EXTS: '100' })));
+    expect(r.status).toBe(403);
+    expect(r.log.reason).toBe('ext-blocked');
+  });
+
+  it('HEAL is refused too — the gap a soft exclusion leaves open', async () => {
+    const r = await authorize(input, deps({ read: inactiveReader, ...W } as any,
+      env({ SSO_HEAL_DOMAINS: '*', SSO_BLOCK_EXTS: '100' })));
+    expect(r.status).toBe(403);
+    expect(r.log.reason).toBe('ext-blocked');
+  });
+
+  it('REPAIR is skipped, so no device is recreated behind an allowed login', async () => {
+    const r = await authorize(input, deps({ read: activeReader } as any,
+      env({ SSO_REPAIR_DOMAINS: '*', SSO_BLOCK_EXTS: '100' })));
+    expect(r.status).toBe(200);
+    expect(r.repair).toBeUndefined();
+  });
+
+  it('but an existing working user still SIGNS IN — blocking creation must not disconnect anyone', async () => {
+    const r = await authorize(input, deps({ read: activeReader } as any, env({ SSO_BLOCK_EXTS: '100' })));
+    expect(r.status).toBe(200);
+  });
+
+  it('a per-domain remove re-permits everything on that one domain', async () => {
+    const e = env({ SSO_PROVISION_DOMAINS: '*', SSO_BLOCK_EXTS: '100',
+                    SSO_BLOCK_EXTS_BY_DOMAIN: '{"demo.12345.service":{"remove":["100"]}}' });
+    const r = await authorize(input, deps({ read: { ...orgBranchReader, getUsers: async () => [] }, ...W } as any, e));
+    expect(r.status).toBe(200);
+  });
+});

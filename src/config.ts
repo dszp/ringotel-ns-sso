@@ -53,6 +53,24 @@ export interface Env {
    * (e.g. retiring a proxy in front of this Worker) is a DNS change with an instant rollback, not a
    * flag day. `/health` is always served regardless of this setting.
    */
+  /**
+   * Extensions that must never gain a softphone device, regardless of domain policy. Comma-separated;
+   * a trailing `*` is a prefix wildcard (`90*` covers 900, 901, 9012…). This blocks every path that
+   * would CREATE a device — provision, heal, and post-response repair — but deliberately does NOT block
+   * the login itself: an extension that already has a working record keeps working. Empty ⇒ nothing
+   * blocked.
+   *
+   * Distinct from `RINGOTEL_EXCLUDE_EXTS`, which is a *soft* eligibility rule gating auto-creation only:
+   * a soft exclusion still permits heal and repair, on the reasoning that an existing record implies
+   * somebody deliberately made one. This list is the harder statement — "no device here, ever".
+   */
+  SSO_BLOCK_EXTS?: string;
+  /**
+   * Per-domain overrides for `SSO_BLOCK_EXTS`, as JSON keyed by FULL NetSapiens domain:
+   * `{"a.12345.service": {"remove": ["900"]}, "b.12345.service": {"add": ["8000"]}}`. Applied on top of
+   * the global list (add, then remove), so the usual shape is "blocked everywhere, permitted on one".
+   */
+  SSO_BLOCK_EXTS_BY_DOMAIN?: string;
   SSO_PATHS?: string;
   /**
    * Whether an SSO-initiated activation should send Ringotel's credentials email. **Default: false.**
@@ -130,6 +148,10 @@ export interface Config {
   provisionBlockDomains: string[] | '*';
   repairBlockDomains: string[] | '*';
 
+  /** Extensions barred from gaining a device (provision/heal/repair). Wildcards allowed. */
+  blockExts: string[];
+  /** Per-domain add/remove applied over `blockExts`, keyed by lowercased full NetSapiens domain. */
+  blockExtsByDomain: Record<string, { add?: string[]; remove?: string[] }>;
   /** Paths answered on POST (always at least one). `/health` is handled before this. */
   paths: string[];
   /** Send Ringotel's credentials email on an SSO-initiated activation. Default false. */
@@ -179,6 +201,41 @@ function parseRequireEmail(v?: string): 'auto' | 'always' | 'never' {
  * allowlist (often `*`) narrowed by a short blocklist, rather than enumerating every permitted domain.
  * An empty blocklist blocks nothing; an empty allowlist permits nothing.
  */
+/** Shared JSON parser for the per-domain `{add, remove}` override shape, with a named error. */
+function parseByDomain(raw: string | undefined, name: string): Record<string, { add?: string[]; remove?: string[] }> {
+  const t = (raw ?? '').trim();
+  if (!t) return {};
+  let parsed: unknown;
+  try { parsed = JSON.parse(t); } catch { throw new ConfigError(`${name} is not valid JSON`); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new ConfigError(`${name} must be a JSON object`);
+  const isStringArray = (x: unknown): x is string[] => Array.isArray(x) && x.every((e) => typeof e === 'string');
+  const out: Record<string, { add?: string[]; remove?: string[] }> = {};
+  for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+    const isObj = v !== null && typeof v === 'object' && !Array.isArray(v);
+    const e = isObj ? (v as Record<string, unknown>) : undefined;
+    if (!isObj || (e!.add !== undefined && !isStringArray(e!.add)) || (e!.remove !== undefined && !isStringArray(e!.remove))) {
+      throw new ConfigError(`${name} entries must be objects with optional string[] add/remove`);
+    }
+    out[k.toLowerCase()] = v as { add?: string[]; remove?: string[] };
+  }
+  return out;
+}
+
+/**
+ * Is this extension barred from gaining a device on this domain? Resolves the global blocklist, applies
+ * the domain's `add` then `remove`, and matches with prefix-wildcard support (`90*`). Callers use it to
+ * refuse provision/heal and to skip repair — never to refuse a login, since blocking device CREATION
+ * shouldn't disconnect an extension that already works.
+ */
+export function extBlocked(ext: string, domain: string, config: Pick<Config, 'blockExts' | 'blockExtsByDomain'>): boolean {
+  const dom = config.blockExtsByDomain[domain.toLowerCase()] ?? {};
+  const set = new Set(config.blockExts);
+  for (const a of dom.add ?? []) set.add(a);
+  for (const r of dom.remove ?? []) set.delete(r);
+  const e = ext.trim();
+  return [...set].some((p) => (p.endsWith('*') ? e.startsWith(p.slice(0, -1)) : e === p));
+}
+
 export function domainAllowed(allow: string[] | '*', block: string[] | '*', domain: string): boolean {
   return domainInList(allow, domain) && !domainInList(block, domain);
 }
@@ -190,7 +247,13 @@ export function domainInList(list: string[] | '*', domain: string): boolean {
 const SOFT_CATS: readonly SoftCategory[] = ['names', 'exts', 'no_devices'];
 
 function parseEligibility(env: Env): EligibilityConfig {
-  const rawNames = env.RINGOTEL_EXCLUDE_NAMES !== undefined ? csv(env.RINGOTEL_EXCLUDE_NAMES) : ['SHARED', 'SHARED VOICEMAIL', 'FAX'];
+  // Seeded soft-exclusion name matchers. SUBSTRING, case-insensitive — so 'GENERAL' already covers
+  // 'GENERAL VOICEMAIL', and 'VOICEMAIL' subsumes 'SHARED VOICEMAIL' — the longer form is kept only
+  // to show that a more specific matcher can be listed. 'CONFERENCE' is spelled out deliberately — bare 'CONF' would also match
+  // surnames — with 'CONF RM'/'CONF ROOM' added for the abbreviated forms it therefore misses.
+  // Soft means
+  // reseller-overridable and creation-only: an existing user is never blocked from signing in.
+  const rawNames = env.RINGOTEL_EXCLUDE_NAMES !== undefined ? csv(env.RINGOTEL_EXCLUDE_NAMES) : ['SHARED', 'SHARED VOICEMAIL', 'VOICEMAIL', 'FAX', 'GENERAL', 'CONFERENCE', 'CONF RM', 'CONF ROOM', 'ROUTING'];
   const excludeNames = rawNames.map((n) => n.toLowerCase());
 
   let excludeExtsByDomain: EligibilityConfig['excludeExtsByDomain'] = {};
@@ -283,6 +346,8 @@ export function parseConfig(env: Env): Config {
     provisionBlockDomains: parseList(env.SSO_PROVISION_BLOCK_DOMAINS),
     repairBlockDomains: parseList(env.SSO_REPAIR_BLOCK_DOMAINS),
     paths: parsePaths(env.SSO_PATHS),
+    blockExts: csv(env.SSO_BLOCK_EXTS),
+    blockExtsByDomain: parseByDomain(env.SSO_BLOCK_EXTS_BY_DOMAIN, 'SSO_BLOCK_EXTS_BY_DOMAIN'),
     sendActivationEmail: truthy(env.SSO_SEND_ACTIVATION_EMAIL),
     requireEmail: parseRequireEmail(env.SSO_REQUIRE_EMAIL),
     eligibility: parseEligibility(env),
