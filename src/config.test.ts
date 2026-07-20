@@ -255,3 +255,41 @@ describe('SSO_BLOCK_EXTS — no device, ever', () => {
     expect(() => cfg({ SSO_BLOCK_EXTS_BY_DOMAIN: '{"d":{"add":"900"}}' })).toThrow(/add\/remove/);
   });
 });
+
+describe('extBlocked — wildcard and per-domain interaction (regression)', () => {
+  const cfg = (over: Partial<Env> = {}) => parseConfig({ ...base, ...over });
+
+  it('a per-domain remove exempts an extension matched by a WILDCARD block', () => {
+    // Regression: `remove` used to be set-subtraction, so deleting the literal "900" from a list
+    // containing the pattern "90*" was a no-op — the exempt domain stayed blocked, silently.
+    const c = cfg({ SSO_BLOCK_EXTS: '90*', SSO_BLOCK_EXTS_BY_DOMAIN: '{"one.12345.service":{"remove":["900"]}}' });
+    expect(extBlocked('900', 'one.12345.service', c)).toBe(false);
+    expect(extBlocked('901', 'one.12345.service', c)).toBe(true);
+    expect(extBlocked('900', 'other.12345.service', c)).toBe(true);
+  });
+
+  it('a wildcard REMOVE exempts a range from an exact block', () => {
+    const c = cfg({ SSO_BLOCK_EXTS: '900,901', SSO_BLOCK_EXTS_BY_DOMAIN: '{"one.12345.service":{"remove":["90*"]}}' });
+    expect(extBlocked('900', 'one.12345.service', c)).toBe(false);
+    expect(extBlocked('901', 'one.12345.service', c)).toBe(false);
+  });
+
+  it('remove beats add within the same domain entry', () => {
+    const c = cfg({ SSO_BLOCK_EXTS_BY_DOMAIN: '{"one.12345.service":{"add":["90*"],"remove":["900"]}}' });
+    expect(extBlocked('900', 'one.12345.service', c)).toBe(false);
+    expect(extBlocked('901', 'one.12345.service', c)).toBe(true);
+  });
+
+  it('whitespace in the JSON arrays does not break matching', () => {
+    const c = cfg({ SSO_BLOCK_EXTS_BY_DOMAIN: '{"one.12345.service":{"add":[" 900 "]}}' });
+    expect(extBlocked('900', 'one.12345.service', c)).toBe(true);
+  });
+});
+
+describe('per-domain overrides fail CLOSED on a typo', () => {
+  const cfg = (v: string) => () => parseConfig({ ...base, SSO_BLOCK_EXTS_BY_DOMAIN: v });
+  it('rejects an unknown key rather than silently blocking nothing', () =>
+    expect(cfg('{"d.12345.service":{"ad":["900"]}}')).toThrow(/unknown key/));
+  it('rejects the same value in both add and remove', () =>
+    expect(cfg('{"d.12345.service":{"add":["900"],"remove":["900"]}}')).toThrow(/both add and remove/));
+});

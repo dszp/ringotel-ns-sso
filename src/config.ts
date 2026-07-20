@@ -46,16 +46,9 @@ export interface Env {
   /** FULL NetSapiens domains (or `*`) where post-response repair is refused even if SSO_REPAIR_DOMAINS allows. */
   SSO_REPAIR_BLOCK_DOMAINS?: string;
   /**
-   * Request paths this Worker answers `POST` on. Comma-separated; default `/authorize`. Ringotel's SSO
-   * service definition holds whatever endpoint URL was configured for YOUR integration — often not
-   * `/authorize` (e.g. a proxy's `/webhook/<id>`) — and changing it is a vendor-side support request.
-   * Accepting a LIST lets one deploy answer on both the old and new paths at once, so moving traffic
-   * (e.g. retiring a proxy in front of this Worker) is a DNS change with an instant rollback, not a
-   * flag day. `/health` is always served regardless of this setting.
-   */
-  /**
    * Extensions that must never gain a softphone device, regardless of domain policy. Comma-separated;
-   * a trailing `*` is a prefix wildcard (`90*` covers 900, 901, 9012…). This blocks every path that
+   * a trailing `*` is a prefix wildcard (`90*` covers 900, 901, 9012…; a bare `*` blocks every
+   * extension everywhere). This blocks every path that
    * would CREATE a device — provision, heal, and post-response repair — but deliberately does NOT block
    * the login itself: an extension that already has a working record keeps working. Empty ⇒ nothing
    * blocked.
@@ -71,6 +64,14 @@ export interface Env {
    * the global list (add, then remove), so the usual shape is "blocked everywhere, permitted on one".
    */
   SSO_BLOCK_EXTS_BY_DOMAIN?: string;
+  /**
+   * Request paths this Worker answers `POST` on. Comma-separated; default `/authorize`. Ringotel's SSO
+   * service definition holds whatever endpoint URL was configured for YOUR integration — often not
+   * `/authorize` (e.g. a proxy's `/webhook/<id>`) — and changing it is a vendor-side support request.
+   * Accepting a LIST lets one deploy answer on both the old and new paths at once, so moving traffic
+   * (e.g. retiring a proxy in front of this Worker) is a DNS change with an instant rollback, not a
+   * flag day. `/health` is always served regardless of this setting.
+   */
   SSO_PATHS?: string;
   /**
    * Whether an SSO-initiated activation should send Ringotel's credentials email. **Default: false.**
@@ -196,11 +197,6 @@ function parseRequireEmail(v?: string): 'auto' | 'always' | 'never' {
   throw new ConfigError(`SSO_REQUIRE_EMAIL must be one of auto|always|never (got "${v}")`);
 }
 
-/**
- * Is `domain` permitted by an allow/block pair? **Block always wins**, so the intended shape is a broad
- * allowlist (often `*`) narrowed by a short blocklist, rather than enumerating every permitted domain.
- * An empty blocklist blocks nothing; an empty allowlist permits nothing.
- */
 /** Shared JSON parser for the per-domain `{add, remove}` override shape, with a named error. */
 function parseByDomain(raw: string | undefined, name: string): Record<string, { add?: string[]; remove?: string[] }> {
   const t = (raw ?? '').trim();
@@ -216,7 +212,15 @@ function parseByDomain(raw: string | undefined, name: string): Record<string, { 
     if (!isObj || (e!.add !== undefined && !isStringArray(e!.add)) || (e!.remove !== undefined && !isStringArray(e!.remove))) {
       throw new ConfigError(`${name} entries must be objects with optional string[] add/remove`);
     }
-    out[k.toLowerCase()] = v as { add?: string[]; remove?: string[] };
+    // A misspelled key, or a value in BOTH add and remove, would otherwise parse cleanly and quietly
+    // block nothing — failing OPEN, the wrong direction for a parser whose errors become a 403.
+    const unknown = Object.keys(e!).filter((x) => x !== 'add' && x !== 'remove');
+    if (unknown.length) throw new ConfigError(`${name} entry "${k}" has unknown key(s): ${unknown.join(', ')}`);
+    const add = (e!.add as string[] | undefined)?.map((x) => x.trim());
+    const remove = (e!.remove as string[] | undefined)?.map((x) => x.trim());
+    const both = (add ?? []).filter((x) => (remove ?? []).includes(x));
+    if (both.length) throw new ConfigError(`${name} entry "${k}" lists ${both.join(', ')} in both add and remove`);
+    out[k.toLowerCase()] = { ...(add ? { add } : {}), ...(remove ? { remove } : {}) };
   }
   return out;
 }
@@ -227,15 +231,28 @@ function parseByDomain(raw: string | undefined, name: string): Record<string, { 
  * refuse provision/heal and to skip repair — never to refuse a login, since blocking device CREATION
  * shouldn't disconnect an extension that already works.
  */
+const extMatches = (ext: string, patterns: string[]): boolean =>
+  patterns.some((p) => {
+    const t = p.trim();
+    return t.endsWith('*') ? ext.startsWith(t.slice(0, -1)) : ext === t;
+  });
+
 export function extBlocked(ext: string, domain: string, config: Pick<Config, 'blockExts' | 'blockExtsByDomain'>): boolean {
   const dom = config.blockExtsByDomain[domain.toLowerCase()] ?? {};
-  const set = new Set(config.blockExts);
-  for (const a of dom.add ?? []) set.add(a);
-  for (const r of dom.remove ?? []) set.delete(r);
   const e = ext.trim();
-  return [...set].some((p) => (p.endsWith('*') ? e.startsWith(p.slice(0, -1)) : e === p));
+  // `remove` is evaluated with the SAME wildcard matching as the block list, not as set subtraction.
+  // Deleting the literal string would make the two headline features silently incompatible: a global
+  // `90*` with a per-domain `remove: ["900"]` would delete nothing, leaving 900 blocked on the very
+  // domain meant to be exempt — no error, no log, just denied logins.
+  if (extMatches(e, dom.remove ?? [])) return false;
+  return extMatches(e, [...config.blockExts, ...(dom.add ?? [])]);
 }
 
+/**
+ * Is `domain` permitted by an allow/block pair? **Block always wins**, so the intended shape is a broad
+ * allowlist (often `*`) narrowed by a short blocklist, rather than enumerating every permitted domain.
+ * An empty blocklist blocks nothing; an empty allowlist permits nothing.
+ */
 export function domainAllowed(allow: string[] | '*', block: string[] | '*', domain: string): boolean {
   return domainInList(allow, domain) && !domainInList(block, domain);
 }
@@ -256,28 +273,8 @@ function parseEligibility(env: Env): EligibilityConfig {
   const rawNames = env.RINGOTEL_EXCLUDE_NAMES !== undefined ? csv(env.RINGOTEL_EXCLUDE_NAMES) : ['SHARED', 'SHARED VOICEMAIL', 'VOICEMAIL', 'FAX', 'GENERAL', 'CONFERENCE', 'CONF RM', 'CONF ROOM', 'ROUTING'];
   const excludeNames = rawNames.map((n) => n.toLowerCase());
 
-  let excludeExtsByDomain: EligibilityConfig['excludeExtsByDomain'] = {};
-  const rawPd = (env.RINGOTEL_EXCLUDE_EXTS_BY_DOMAIN ?? '').trim();
-  if (rawPd) {
-    let parsed: unknown;
-    try { parsed = JSON.parse(rawPd); } catch { throw new ConfigError('RINGOTEL_EXCLUDE_EXTS_BY_DOMAIN is not valid JSON'); }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new ConfigError('RINGOTEL_EXCLUDE_EXTS_BY_DOMAIN must be a JSON object');
-    const isStringArray = (x: unknown): x is string[] => Array.isArray(x) && x.every((e) => typeof e === 'string');
-    // (M5) Lowercase the domain keys at parse time so this lookup matches the lowercased `ctx.domain`
-    // authorize.ts passes into evaluateEligibility, regardless of the case Ringotel/NS presents the domain in.
-    const lowered: EligibilityConfig['excludeExtsByDomain'] = {};
-    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-      const isEntryObject = v !== null && typeof v === 'object' && !Array.isArray(v);
-      const entry = isEntryObject ? (v as Record<string, unknown>) : undefined;
-      const addOk = !isEntryObject || entry!.add === undefined || isStringArray(entry!.add);
-      const removeOk = !isEntryObject || entry!.remove === undefined || isStringArray(entry!.remove);
-      if (!isEntryObject || !addOk || !removeOk) {
-        throw new ConfigError('RINGOTEL_EXCLUDE_EXTS_BY_DOMAIN entries must be objects with optional string[] add/remove');
-      }
-      lowered[k.toLowerCase()] = v as { add?: string[]; remove?: string[] };
-    }
-    excludeExtsByDomain = lowered;
-  }
+  let excludeExtsByDomain: EligibilityConfig['excludeExtsByDomain'];
+  excludeExtsByDomain = parseByDomain(env.RINGOTEL_EXCLUDE_EXTS_BY_DOMAIN, 'RINGOTEL_EXCLUDE_EXTS_BY_DOMAIN');
 
   return {
     excludeNames,

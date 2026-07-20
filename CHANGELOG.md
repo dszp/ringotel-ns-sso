@@ -13,7 +13,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Unlike the soft `RINGOTEL_EXCLUDE_EXTS` rule, which gates auto-creation only and still permits heal and
   repair, this blocks **every** device-creating path. It does not refuse the login, so an extension that
   already has a working record keeps working. Prefix wildcards (`90*`) and per-domain `add`/`remove` are
-  supported, so "blocked everywhere except one domain" is expressible.
+  supported, so "blocked everywhere except one domain" is expressible — `remove` matches with the same
+  wildcard semantics as the block list, so the two features compose. A blocked extension whose record is
+  already healthy still signs in and can still be de-duplicated; only paths that would CREATE a device
+  are refused.
 
 ### Changed
 

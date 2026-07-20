@@ -571,6 +571,33 @@ describe('SSO_BLOCK_EXTS gates every device-creating path', () => {
     expect(r.log.reason).toBe('ext-blocked');
   });
 
+  it('HEAL still proceeds for a blocked ext when the device ALREADY EXISTS — no device is created', async () => {
+    // The point of the gate is "no device, ever", not "no login". A healthy record with a tombstone
+    // sibling resolves to the `heal` ACTION but only needs a dedup, so denying it would disconnect a
+    // working user. Device creation is what's refused, not the heal itself.
+    const createDevice = vi.fn();
+    const NS2 = {
+      getDevices: async () => [{ device: '100r' }],
+      getDevice: async () => ({ 'device-sip-registration-password': 'existing' }),
+      createDevice,
+    } as any;
+    const r = await authorize(input, deps({ read: inactiveReader, getWrite: async () => ({ rt: RT, ns: NS2 }) } as any,
+      env({ SSO_HEAL_DOMAINS: '*', SSO_BLOCK_EXTS: '100' })));
+    expect(r.status).toBe(200);
+    expect(createDevice).not.toHaveBeenCalled();
+    expect(r.log.extBlocked).toBe(true);
+  });
+
+  it('HEAL is refused for a blocked ext when the device is MISSING (it would have to create one)', async () => {
+    const createDevice = vi.fn();
+    const NS3 = { getDevices: async () => [], getDevice: async () => ({}), createDevice } as any;
+    const r = await authorize(input, deps({ read: inactiveReader, getWrite: async () => ({ rt: RT, ns: NS3 }) } as any,
+      env({ SSO_HEAL_DOMAINS: '*', SSO_BLOCK_EXTS: '100' })));
+    expect(r.status).toBe(403);
+    expect(r.log.reason).toBe('ext-blocked');
+    expect(createDevice).not.toHaveBeenCalled();
+  });
+
   it('REPAIR is skipped, so no device is recreated behind an allowed login', async () => {
     const r = await authorize(input, deps({ read: activeReader } as any,
       env({ SSO_REPAIR_DOMAINS: '*', SSO_BLOCK_EXTS: '100' })));

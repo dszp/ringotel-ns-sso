@@ -114,13 +114,16 @@ function toEligUser(self: Rec, ext: string, email: string): EligUser {
 }
 
 /** Ensure the NS softphone device exists; return its SIP password. */
-async function ensureDevice(ns: WriteNs, domain: string, ext: string, device: string): Promise<string> {
+async function ensureDevice(ns: WriteNs, domain: string, ext: string, device: string, mayCreate = true): Promise<string> {
   const devices = await ns.getDevices(domain, ext);
   const existing = devices.find((d) => String(d.device ?? '') === device);
   if (existing) {
     const dev = await ns.getDevice(domain, ext, device);
     return String(dev[SIP_PW_FIELD] ?? existing[SIP_PW_FIELD] ?? '');
   }
+  // `mayCreate: false` is how a blocked extension still gets healed when healing needs no new device:
+  // an empty return propagates to the caller's existing blank-password guard, which denies.
+  if (!mayCreate) return '';
   const created = await ns.createDevice(domain, ext, device);
   return String(created[SIP_PW_FIELD] ?? '');
 }
@@ -232,7 +235,13 @@ export async function authorize(input: AuthorizeInput, deps: AuthorizeDeps): Pro
   // post-response repair below), independently of the domain's mode. Deliberately does NOT refuse the
   // login: barring device creation shouldn't disconnect an extension that already has a working record.
   const blockedExt = extBlocked(ext, domain, config);
-  if (blockedExt && (decision.action === 'provision' || decision.action === 'heal')) {
+  if (blockedExt) log.extBlocked = true;
+  // Provisioning always creates a device, so a blocked extension is refused outright. HEAL is not
+  // refused here: it is also the action for an `ambiguous` verdict, where a healthy user with a
+  // tombstone sibling needs only a dedup — no device. Blocking that would deny a working login, which
+  // this feature explicitly promises not to do. Heal instead runs with device CREATION disabled below,
+  // and denies only if it turns out a device would have been needed.
+  if (blockedExt && decision.action === 'provision') {
     log.action = decision.action;
     return { status: 403, log: { ...log, outcome: 'deny', reason: 'ext-blocked' } };
   }
@@ -300,10 +309,13 @@ export async function authorize(input: AuthorizeInput, deps: AuthorizeDeps): Pro
     }
 
     const { rt, ns } = await getWrite();
-    const password = await ensureDevice(ns, domain, ext, device);
+    const password = await ensureDevice(ns, domain, ext, device, !blockedExt);
     // (M1) Never write a blank SIP password into Ringotel: on heal this would overwrite a working
     // password on the canonical record with an empty one. Fail closed BEFORE any Ringotel write.
-    if (!password) return { status: 403, log: { ...log, outcome: 'deny', reason: 'no-sip-password' } };
+    // For a blocked extension the blank also means "the device is missing and we refused to create it".
+    if (!password) {
+      return { status: 403, log: { ...log, outcome: 'deny', reason: blockedExt ? 'ext-blocked' : 'no-sip-password' } };
+    }
 
     // (F1) Activate the canonical FIRST, then best-effort delete the non-canonical siblings — reordered
     // from "dedup siblings → ensureDevice → activate" to close the brick window: if siblings are deleted
