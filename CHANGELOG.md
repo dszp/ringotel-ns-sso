@@ -5,6 +5,30 @@ All notable changes to `ringotel-ns-sso` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-07-20
+
+### Fixed
+
+- `SSO_BLOCK_EXTS_BY_DOMAIN`'s `remove` used exact-string subtraction while the block list matched with
+  wildcards, so the two features silently didn't compose: a global `90*` with a per-domain
+  `remove: ["900"]` left 900 blocked on the domain meant to be exempt — no error, no log, just denied
+  logins. Both sides now use the same matcher, in either direction.
+- A blocked extension was refused for the `heal` action outright. But `heal` is also the action for an
+  `ambiguous` verdict — a healthy record beside a tombstone, needing only a de-duplication and no
+  device — so a working user could be denied a login, which this feature explicitly promises not to do.
+  Heal now runs with device creation disabled and denies only if a device would actually be required.
+- A repair skipped because of the extension blocklist was logged identically to one skipped because the
+  domain isn't repair-enabled. `extBlocked` is now recorded on every path.
+- The per-domain override parser accepted unknown keys and the same value in both `add` and `remove`,
+  both of which silently blocked nothing — failing open. Both are now startup errors.
+
+### Changed
+
+- Narrowed the seeded `GENERAL` matcher to `GENERAL VOICEMAIL` and `GENERAL MAILBOX`. Being a substring
+  match, bare `GENERAL` also caught a staffed "General Manager" — and a soft exclusion at verdict `none`
+  resolves to a denial, so the cost was a refused login for a real person rather than a skipped
+  auto-create. Same reasoning that already ruled out bare `CONF`.
+
 ## [0.1.1] - 2026-07-20
 
 ### Added
@@ -13,10 +37,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Unlike the soft `RINGOTEL_EXCLUDE_EXTS` rule, which gates auto-creation only and still permits heal and
   repair, this blocks **every** device-creating path. It does not refuse the login, so an extension that
   already has a working record keeps working. Prefix wildcards (`90*`) and per-domain `add`/`remove` are
-  supported, so "blocked everywhere except one domain" is expressible — `remove` matches with the same
-  wildcard semantics as the block list, so the two features compose. A blocked extension whose record is
-  already healthy still signs in and can still be de-duplicated; only paths that would CREATE a device
-  are refused.
+  supported, so "blocked everywhere except one domain" is expressible.
 
 ### Changed
 
@@ -27,9 +48,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
   The matcher is substring and case-insensitive, which drives the choices: bare `VOICEMAIL` already
   subsumes the two longer voicemail entries, which are kept only to show that a more specific matcher
-  can be listed. Bare `GENERAL` and bare `CONF` are deliberately **not** used — they would also match a
-  staffed "General Manager" and surnames like "Confalone" — so the specific forms are spelled out
-  instead, with `CONF RM` and `CONF ROOM` covering the abbreviations `CONFERENCE` misses.
+  can be listed. `CONFERENCE` is spelled out rather than `CONF`, which would also match surnames, with
+  `CONF RM` and `CONF ROOM` covering the abbreviations it misses.
 
   These are **soft** exclusions: creation-only and overridable, so an existing user is never blocked
   from signing in. Set `RINGOTEL_EXCLUDE_NAMES` to replace the list, or to empty to disable name
