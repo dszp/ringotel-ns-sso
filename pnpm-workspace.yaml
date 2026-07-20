@@ -1,0 +1,7 @@
+allowBuilds:
+  esbuild: true
+  sharp: true
+  workerd: true
+minimumReleaseAgeExclude:
+  - '@dszp/netsapiens-lib@0.1.4'
+  - '@dszp/ringotel-lib@0.1.4'

@@ -1,0 +1,27 @@
+{
+  "name": "ringotel-ns-sso",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-01-01",
+  "workers_dev": false,
+  "observability": { "enabled": true },
+  "ratelimits": [{ "name": "SSO_RATE_LIMITER", "namespace_id": "2001", "simple": { "limit": 10, "period": 60 } }],
+  "vars": {
+    "NS_SERVER": "",            // NetSapiens API host, e.g. api.example.com (v2 + device writes)
+    "NS_OAUTH_SERVER": "",      // optional; OAuth host if different from NS_SERVER (blank ⇒ use NS_SERVER)
+    "DEVICE_SUFFIX": "r",
+    // Domain lists below are FULL NetSapiens domains (e.g. example.12345.service) — not the short
+    // label from username, and not the Ringotel org domain. Blocks always beat allowlists.
+    "SSO_HEAL_DOMAINS": "",     // "*" | CSV | "" (off)
+    "SSO_PROVISION_DOMAINS": "",// "*" | CSV | "" (off)
+    "SSO_REPAIR_DOMAINS": "",   // "*" | CSV | "" (off)
+    "SSO_PATHS": "",            // CSV of POST paths; "" = just /authorize
+    "SSO_BLOCK_DOMAINS": "",            // refuse login outright; blocks always beat allowlists
+    "SSO_HEAL_BLOCK_DOMAINS": "",
+    "SSO_PROVISION_BLOCK_DOMAINS": "",
+    "SSO_REPAIR_BLOCK_DOMAINS": "",
+    "RINGOTEL_EXCLUDE_NAMES": "",       // blank ⇒ defaults SHARED,SHARED VOICEMAIL,FAX
+    "RINGOTEL_EXCLUDE_EXTS": "",
+    "RINGOTEL_EXCLUDE_EXTS_BY_DOMAIN": "",
+    "SSO_DOMAIN_MAP": ""        // optional JSON: NS-first-label → Ringotel org key overrides
+  }
+}

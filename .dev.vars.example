@@ -1,0 +1,19 @@
+# Copy to .dev.vars (gitignored) and fill in real values for local `wrangler dev`.
+# This is the MINIMAL secret set to get the Worker running. Non-secret vars (NS_SERVER, the
+# allowlists, eligibility config, ...) live in wrangler.jsonc — see SETUP.md for the full reference.
+# For a real deploy, set these with `wrangler secret put <NAME>` instead of a file — never commit .dev.vars.
+
+# The Basic-auth credential Ringotel (or a proxy in front of this Worker) must present on every request.
+SSO_BASIC_USER=ringotel-webhook
+SSO_BASIC_PASSWORD=change-me
+
+# NetSapiens OAuth master key — always required; verifies the end user's own login.
+NS_OAUTH_CLIENT_ID=your-ns-oauth-client-id
+NS_OAUTH_CLIENT_SECRET=your-ns-oauth-client-secret
+
+# Write identity — pick ONE. This example uses a static API key; the alternative is a pair of
+# NS_ADMIN_USER / NS_ADMIN_PASS secrets (see SETUP.md for the OM-single-domain caveat).
+NS_API_KEY=your-ns-write-api-key
+
+# Ringotel AdminAPI key — read always; write when heal/provision is enabled for a domain.
+RINGOTEL_API_KEY=your-ringotel-admin-api-key

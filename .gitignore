@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.dev.vars
+.wrangler/
+*.log
+
+# Private / internal — NEVER publish (this repo is public):
+CLAUDE.md
+docs/superpowers/
+.superpowers/
+wrangler.local.jsonc
