@@ -20,15 +20,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- Widened the seeded soft-exclusion name list to `SHARED`, `SHARED VOICEMAIL`, `FAX`, `GENERAL`,
-  `VOICEMAIL`, `CONFERENCE`, `CONF RM`, `CONF ROOM`, `ROUTING`. (`SHARED VOICEMAIL` is now subsumed by
-  `VOICEMAIL` and kept only to illustrate that a more specific matcher can be listed.) These are the shapes of non-human extensions that
-  should not silently become billable app seats on first login. The matcher is substring and
-  case-insensitive, so `GENERAL` also covers "General Voicemail"; `CONFERENCE` is spelled out rather
-  than `CONF` because the short form would also match surnames, with the abbreviated room forms listed
-  explicitly. Soft means creation-only and overridable — an existing user is never blocked from
-  signing in. Override the whole list with `RINGOTEL_EXCLUDE_NAMES`; setting it **empty** disables
-  name exclusions entirely.
+- Widened the seeded soft-exclusion name list used when `RINGOTEL_EXCLUDE_NAMES` is not set, to
+  `SHARED`, `SHARED VOICEMAIL`, `VOICEMAIL`, `FAX`, `GENERAL VOICEMAIL`, `GENERAL MAILBOX`,
+  `CONFERENCE`, `CONF RM`, `CONF ROOM`, `ROUTING` — the usual shapes of non-human extensions that
+  shouldn't silently become billable app seats on first login.
+
+  The matcher is substring and case-insensitive, which drives the choices: bare `VOICEMAIL` already
+  subsumes the two longer voicemail entries, which are kept only to show that a more specific matcher
+  can be listed. Bare `GENERAL` and bare `CONF` are deliberately **not** used — they would also match a
+  staffed "General Manager" and surnames like "Confalone" — so the specific forms are spelled out
+  instead, with `CONF RM` and `CONF ROOM` covering the abbreviations `CONFERENCE` misses.
+
+  These are **soft** exclusions: creation-only and overridable, so an existing user is never blocked
+  from signing in. Set `RINGOTEL_EXCLUDE_NAMES` to replace the list, or to empty to disable name
+  exclusions entirely.
 
 ## [0.1.0] - 2026-07-20
 

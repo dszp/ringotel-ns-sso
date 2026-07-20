@@ -17,7 +17,7 @@ describe('parseConfig', () => {
     expect(c.provisionDomains).toEqual([]);
     expect(c.writeIdentity).toEqual({ kind: 'api', token: 'nstoken' });
     expect(c.nsOauthServer).toBe('api.example.com'); // defaults to NS_SERVER
-    expect(c.eligibility.excludeNames).toEqual(['shared', 'shared voicemail', 'voicemail', 'fax', 'general', 'conference', 'conf rm', 'conf room', 'routing']);
+    expect(c.eligibility.excludeNames).toEqual(['shared', 'shared voicemail', 'voicemail', 'fax', 'general voicemail', 'general mailbox', 'conference', 'conf rm', 'conf room', 'routing']);
   });
 
   it('prefers admin OAuth identity when NS_ADMIN_USER/PASS set', () => {
@@ -194,13 +194,17 @@ describe('seeded name exclusions', () => {
   const matches = (name: string) => seeded.some((m) => name.toLowerCase().includes(m));
 
   it('catches the long forms via their short prefixes', () => {
-    for (const n of ['General Voicemail', 'GENERAL', 'Conference Room', 'Conf Rm 2', 'CONF ROOM B', 'Routing', 'Shared Voicemail', 'Fax Line']) {
+    for (const n of ['General Voicemail', 'General Mailbox', 'Conference Room', 'Conf Rm 2', 'CONF ROOM B', 'Routing', 'Shared Voicemail', 'Sales Voicemail', 'Fax Line']) {
       expect(matches(n)).toBe(true);
     }
   });
 
   it('leaves ordinary names alone', () => {
-    for (const n of ['Dana Reed', 'Sales Desk', 'Front Office']) expect(matches(n)).toBe(false);
+    // 'General Manager' is the reason bare GENERAL was narrowed: it's a plausible staffed extension, and
+    // a soft hit at verdict 'none' resolves to DENY — a 403 for a real person, not just a skipped create.
+    for (const n of ['Dana Reed', 'Sales Desk', 'Front Office', 'General Manager', 'Confalone']) {
+      expect(matches(n)).toBe(false);
+    }
   });
 
   it('an explicitly EMPTY env value means no exclusions at all, overriding the seed', () => {
