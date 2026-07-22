@@ -204,24 +204,27 @@ export async function authorize(input: AuthorizeInput, deps: AuthorizeDeps): Pro
   let eligible = true;
   if (res.verdict === 'none' && mode === 'provision') {
     const eu = toEligUser(self, ext, email);
-    // (M5) Lowercase the domain passed into eligibility so it matches the lowercased
-    // `excludeExtsByDomain` keys parsed in config.ts — case can't desync the per-domain override lookup.
-    const elig = evaluateEligibility(eu, { domain: domain.toLowerCase(), isReseller: false }, config.eligibility);
-    eligible = elig.activatable;
-    log.eligibility = elig.tier;
-
     // The email precondition exists because activation traditionally emails the credentials — it is a
     // "somewhere to send them" check, not a policy about who deserves an app. When we are NOT sending
     // that email, the reason evaporates, so `auto` waives it. `always` keeps it (some operators use a
     // missing address as a deliberate marker for staff who shouldn't get an app login); `never` drops it.
-    // Deliberately narrow: only the EMAIL precondition is waived — matched on the blank address itself,
-    // so a future precondition added to the library is not silently bypassed along with it.
+    // Still deliberately narrow: `emailNotRequired` waives ONLY the email check inside the library, so a
+    // future precondition added there is not silently bypassed along with it. The waiver used to be
+    // re-implemented here on top of the result; it now rides the shared engine, so this Worker and the
+    // portal produce the same verdict from the same inputs.
     const mustHaveEmail =
       config.requireEmail === 'always' || (config.requireEmail === 'auto' && config.sendActivationEmail);
-    if (!eligible && !mustHaveEmail && elig.tier === 'precondition' && !email) {
-      eligible = true;
-      log.emailPrecondition = 'waived';
-    }
+    // (M5) Lowercase the domain passed into eligibility so it matches the lowercased
+    // `excludeExtsByDomain` keys parsed in config.ts — case can't desync the per-domain override lookup.
+    const elig = evaluateEligibility(
+      eu,
+      { domain: domain.toLowerCase(), isReseller: false, emailNotRequired: !mustHaveEmail },
+      config.eligibility,
+    );
+    eligible = elig.activatable;
+    log.eligibility = elig.tier;
+    // `emailWaived` means: eligible, but there is no address — so nothing may be mailed to this user.
+    if (elig.emailWaived) log.emailPrecondition = 'waived';
   }
 
   // 5. Decide.

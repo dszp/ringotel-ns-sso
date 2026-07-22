@@ -5,6 +5,20 @@ All notable changes to `ringotel-ns-sso` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-07-22
+
+### Changed
+
+- **The email-precondition waiver now rides the shared eligibility engine instead of being
+  re-implemented here.** `@dszp/netsapiens-lib` 0.1.5 gained `EligContext.emailNotRequired`, so this
+  worker passes the flag rather than overriding `activatable` after the call. Same rule, same narrow
+  scope — only the email check is waived, so a precondition added to the library later is not silently
+  bypassed with it — but the verdict is now produced by one implementation shared with the other
+  consumer of that engine, which is the point: identical inputs can no longer yield different answers.
+  `requireEmail` / `sendActivationEmail` still decide *when* the flag is passed; behavior is unchanged.
+  Waiver logging keys off the library's `EligResult.emailWaived`.
+- Requires `@dszp/netsapiens-lib` **^0.1.5**.
+
 ## [0.1.2] - 2026-07-20
 
 ### Fixed

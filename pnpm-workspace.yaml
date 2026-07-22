@@ -3,5 +3,5 @@ allowBuilds:
   sharp: true
   workerd: true
 minimumReleaseAgeExclude:
-  - '@dszp/netsapiens-lib@0.1.4'
+  - '@dszp/netsapiens-lib@0.1.4 || 0.1.5'
   - '@dszp/ringotel-lib@0.1.4'

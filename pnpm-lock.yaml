@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@dszp/netsapiens-lib':
-        specifier: ^0.1.4
-        version: 0.1.4
+        specifier: ^0.1.5
+        version: 0.1.5
       '@dszp/ringotel-lib':
         specifier: ^0.1.4
         version: 0.1.4
@@ -80,8 +80,8 @@ packages:
     resolution: {integrity: sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw==}
     engines: {node: '>=12'}
 
-  '@dszp/netsapiens-lib@0.1.4':
-    resolution: {integrity: sha512-Fco77/D7fiSpysFzPsOi4DWOGIrOTZe5RgUeh+MwtT8GFo21xBWfem9XHGcv4ofAZm/GR22crXqcNcwKr0c9jw==}
+  '@dszp/netsapiens-lib@0.1.5':
+    resolution: {integrity: sha512-tHkC4+3Jt8PypUrljpGz38TumcKOMB3OuxJFqq9T0tjCeN31y1QtoQhCnX8c2KhO6eKQ7/DoaBspOk4NYOWlnQ==}
     engines: {node: '>=20'}
 
   '@dszp/ringotel-lib@0.1.4':
@@ -1039,7 +1039,7 @@ snapshots:
     dependencies:
       '@jridgewell/trace-mapping': 0.3.9
 
-  '@dszp/netsapiens-lib@0.1.4': {}
+  '@dszp/netsapiens-lib@0.1.5': {}
 
   '@dszp/ringotel-lib@0.1.4': {}
 
