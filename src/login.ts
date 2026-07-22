@@ -47,6 +47,10 @@ export const firstLabel = (domain: string): string => (domain.split('.')[0] ?? d
  * deployments that know which one their core stores and would rather spend nothing on the other.
  */
 export function loginCandidates(ext: string, nsDomain: string, form: LoginForm = 'auto'): string[] {
+  // No extension ⇒ no candidates. `@acme` and a whitespace username both parse as "bare" (correctly —
+  // neither carries a usable tenant), and concatenating them produced logins like `@acme` that could
+  // only ever fail, at the cost of two real grant attempts.
+  if (!ext.trim() || !nsDomain.trim()) return [];
   const short = `${ext}@${firstLabel(nsDomain)}`;
   const full = `${ext}@${nsDomain}`;
   if (form === 'short') return [short];

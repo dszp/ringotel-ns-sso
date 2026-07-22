@@ -269,8 +269,10 @@ neither of which is authorization:
    tenant is known, so the organization domain is resolved back to a NetSapiens domain and the login is
    built from that. This is the only step that reads Ringotel before a credential is checked. It reads
    only; it creates nothing; and its output decides *which credentials are verified*, not who the caller
-   is. A wrong or hostile value cannot authenticate anyone — it can only send the password check at a
-   username that will fail. Identity still comes from the self-record afterwards, exactly as before.
+   is. A wrong or hostile value cannot authenticate anyone — at most it sends the password check at some
+   other username, which still requires that account's own password to succeed, and the guard below then
+   compares the outcome against what was claimed. Identity still comes from the self-record afterwards,
+   exactly as before.
    A bare extension with no organization domain is refused outright, and an organization domain that
    answers for more than one branch address is refused rather than resolved to a guess: picking one
    would route a login into a tenant the caller never named.

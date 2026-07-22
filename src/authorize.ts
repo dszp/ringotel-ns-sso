@@ -163,7 +163,11 @@ function memoReader(read: OrgBranchReader): OrgBranchReader {
 
 export async function authorize(input: AuthorizeInput, deps: AuthorizeDeps): Promise<AuthorizeResult> {
   const { config } = deps;
-  const log: Record<string, unknown> = { domain: input.domain };
+  // Normalised ONCE, here, not at the HTTP boundary alone: a whitespace-only value is not a claim, and
+  // treating it as one made the log record a cross-tenant check as having passed with nothing compared.
+  // Doing it in the unit that decides (and logs) keeps that true for every caller, tests included.
+  const claim = input.domain?.trim() || undefined;
+  const log: Record<string, unknown> = { domain: claim };
   const read = memoReader(deps.read);
 
   // Memoized helper: mint the write client at most once (heal/provision device work + provision-create
@@ -190,9 +194,11 @@ export async function authorize(input: AuthorizeInput, deps: AuthorizeDeps): Pro
   } else {
     // No tenant in the username and none supplied ⇒ refuse here, before spending an NS call. An
     // extension is not globally unique, so any guess would be a guess about whose account to open.
-    if (!input.domain) return { status: 403, log: { ...log, outcome: 'deny', reason: 'no-domain-hint' } };
-    const want = input.domain.trim().toLowerCase();
-    const mapped = config.rtDomainMap[want];
+    if (!claim) return { status: 403, log: { ...log, outcome: 'deny', reason: 'no-domain-hint' } };
+    const want = claim.toLowerCase();
+    // Own-property lookup: a plain object would answer `constructor`/`toString` from the prototype
+    // chain, turning a caller-chosen word into a "mapping" that then skips the live lookup.
+    const mapped = Object.hasOwn(config.rtDomainMap, want) ? config.rtDomainMap[want] : undefined;
     let nsDomain: string;
     if (mapped) {
       nsDomain = mapped;
@@ -256,12 +262,21 @@ export async function authorize(input: AuthorizeInput, deps: AuthorizeDeps): Pro
   // accepted here, and anything else is carried forward and decided the moment the org is resolved,
   // still well before any write or any 200.
   let claimPending = false;
-  if (input.domain) {
+  if (claim) {
+    const claimKey = claim.toLowerCase();
+    // SSO_RT_DOMAIN_MAP is an operator's statement that this Ringotel domain IS this NetSapiens domain,
+    // so it has to be accepted here as well as on the backfill path. It was consulted only there at
+    // first, which meant that on exactly the deployments needing the map, a user typing `1045@label`
+    // was refused while the same user typing `1045` signed in — the documented remedy fixing half the
+    // problem and creating the other half.
+    const mapped = Object.hasOwn(config.rtDomainMap, claimKey) ? config.rtDomainMap[claimKey] : undefined;
     if (claimedNsDomain && claimedNsDomain.toLowerCase() === domain.toLowerCase()) {
       // The claim was resolved to a NetSapiens domain before authentication, and that is the domain the
       // credentials turned out to belong to. Nothing about the Ringotel-side spelling need be compared.
       log.domainCheck = 'ok-resolved';
-    } else if (domainClaimMatches(input.domain, { nsDomain: domain })) {
+    } else if (mapped && mapped.toLowerCase() === domain.toLowerCase()) {
+      log.domainCheck = 'ok-mapped';
+    } else if (domainClaimMatches(claim, { nsDomain: domain })) {
       log.domainCheck = 'ok';
     } else {
       claimPending = true;
@@ -284,10 +299,18 @@ export async function authorize(input: AuthorizeInput, deps: AuthorizeDeps): Pro
   // no Ringotel user has been read at this point, so a refusal here is as clean as one before the org
   // lookup; it simply could not be answered any earlier.
   if (claimPending) {
-    if (!domainClaimMatches(input.domain!, { nsDomain: domain, rtDomain: ob.rtDomain })) {
+    if (!ob.rtDomain) {
+      // The org and its branch carry no Ringotel domain at all, so there is no spelling to compare the
+      // claim against — refusing here would deny every login for that tenant the day Ringotel starts
+      // populating the field, for a check that could never have passed. Skipped, and said so in the log.
+      // Nothing is weakened by this: `input.domain` governs nothing downstream, and every read and write
+      // below is already bound to the domain NetSapiens attached to the verified credential.
+      log.domainCheck = 'skipped-no-rt-domain';
+    } else if (!domainClaimMatches(claim!, { nsDomain: domain, rtDomain: ob.rtDomain })) {
       return { status: 403, log: { ...log, outcome: 'deny', reason: 'domain-mismatch' } };
+    } else {
+      log.domainCheck = 'ok-rt';
     }
-    log.domainCheck = 'ok-rt';
   }
 
   // 3. Read + classify the Ringotel records at this extension.

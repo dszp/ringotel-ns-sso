@@ -30,12 +30,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **The `domain` field in the request is now understood as the Ringotel organization domain.** It was
   previously compared only against the NetSapiens domain, so a request carrying Ringotel's own value —
   the one it is actually able to send — would have been refused as a cross-tenant attempt. The
-  cross-tenant guard is unchanged in strength and still refuses a value naming any other tenant, before
-  any write and before any Ringotel user is read; it now accepts the organization domain, the full
-  NetSapiens domain, or that domain's first label, since all three name the same tenant.
+  cross-tenant guard still refuses a value naming another tenant, before any write and before any Ringotel
+  user is read; it now accepts the organization domain, the full NetSapiens domain, that domain's first
+  label, or an `SSO_RT_DOMAIN_MAP` entry, since all of those name the same tenant. Accepting the first
+  label does make two domains sharing one label indistinguishable *to the guard* — every read and write
+  still uses the domain NetSapiens attached to the verified credential, so nothing downstream is affected.
+  An organization with no Ringotel domain configured skips the check rather than denying, so enabling the
+  field cannot become an outage for a tenant whose data could never have satisfied it.
 - The per-account rate-limit key includes the organization domain when the username is a bare extension.
   A bare extension carries no tenant, so `101` from every domain would otherwise share one bucket and a
-  busy tenant could throttle an unrelated one.
+  busy tenant could throttle an unrelated one. Both halves are normalised, so casing or padding cannot
+  split one account across buckets; note the domain half is caller-supplied, so two spellings that mean
+  the same tenant are still two buckets.
+- A branch address carrying a `:port` (a SIP destination, which a NetSapiens domain never is) resolves to
+  the domain without it, instead of carrying the port into a login username or making one address look
+  like two.
 
 ## [0.1.3] - 2026-07-22
 

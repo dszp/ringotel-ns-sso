@@ -117,6 +117,25 @@ describe('resolveNsDomainByRtDomain', () => {
     expect(r).toEqual({ ok: false, reason: 'ambiguous' });
   });
 
+  it('strips a :port from the branch address — a SIP destination, not a domain', async () => {
+    const r = await resolveNsDomainByRtDomain(
+      read([{ id: 'O1', domain: 'acmevoice' }], { O1: [{ id: 'B1', address: 'acme.12345.service:5061' }] }),
+      'acmevoice',
+    );
+    // Left in place it would travel into the login username and into the cross-tenant comparison.
+    expect(r).toEqual({ ok: true, nsDomain: 'acme.12345.service' });
+  });
+
+  it('does not treat the same address with and without a port as two tenants', async () => {
+    const r = await resolveNsDomainByRtDomain(
+      read([{ id: 'O1', domain: 'acmevoice' }], {
+        O1: [{ id: 'B1', address: 'acme.12345.service' }, { id: 'B2', address: 'acme.12345.service:5061' }],
+      }),
+      'acmevoice',
+    );
+    expect(r).toEqual({ ok: true, nsDomain: 'acme.12345.service' });
+  });
+
   it('reports not-found distinctly — the operator fix is a different one', async () => {
     const r = await resolveNsDomainByRtDomain(read([{ id: 'O1', domain: 'other' }], {}), 'acmevoice');
     expect(r).toEqual({ ok: false, reason: 'not-found' });
@@ -304,6 +323,55 @@ describe('authorize: the domain claim is still a cross-tenant guard', () => {
     const r = await authorize({ username: '100@demo', password: 'pw' }, deps());
     expect(r.status).toBe(200);
     expect(r.log.domainCheck).toBe('skipped-not-supplied');
+  });
+});
+
+describe('the cross-tenant guard after review', () => {
+  it('accepts a claim the operator MAPPED, on the verbatim path too', async () => {
+    // The map is an operator statement that this Ringotel domain IS this NetSapiens domain. Consulted
+    // only on the backfill path, it refused `100@demo` while accepting `100` for the same user.
+    const r = await authorize(
+      { username: '100@demo', password: 'pw', domain: 'weird-brand' },
+      deps({} as any, env({ SSO_RT_DOMAIN_MAP: '{"weird-brand":"demo.12345.service"}' })),
+    );
+    expect(r.status).toBe(200);
+    expect(r.log.domainCheck).toBe('ok-mapped');
+  });
+
+  it('does not answer a mapped claim from the prototype chain', async () => {
+    const r = await authorize({ username: '100', password: 'pw', domain: 'constructor' }, deps());
+    expect(r.status).toBe(403);
+    expect(r.log.reason).toBe('unknown-org-domain');
+  });
+
+  it('an org with NO Ringotel domain skips the check instead of denying every login', async () => {
+    // Nothing to compare the claim against — refusing would be an outage for that tenant the day the
+    // vendor starts populating the field, for a check that could never have passed.
+    const read = { ...reader, getOrganizations: async () => [{ id: 'O1', name: 'demo' }] };
+    const r = await authorize({ username: '100@demo', password: 'pw', domain: 'demovoice' }, deps({ read } as any));
+    expect(r.status).toBe(200);
+    expect(r.log.domainCheck).toBe('skipped-no-rt-domain');
+  });
+
+  it('a whitespace-only claim is recorded as not supplied, not as a check that passed', async () => {
+    const r = await authorize({ username: '100@demo', password: 'pw', domain: '   ' }, deps());
+    expect(r.status).toBe(200);
+    expect(r.log.domainCheck).toBe('skipped-not-supplied');
+  });
+
+  it('a branch address with a port still resolves and signs in', async () => {
+    const { auth, tried } = authAccepting('100@demo');
+    const read = { ...reader, getBranches: async () => [{ id: 'B1', address: 'demo.12345.service:5061' }] };
+    const r = await authorize({ username: '100', password: 'pw', domain: 'demovoice' }, deps({ auth, read } as any));
+    expect(tried).toEqual(['100@demo']);
+    expect(r.log.resolvedNsDomain).toBe('demo.12345.service');
+  });
+
+  it('an empty extension yields no grant attempts at all', async () => {
+    const authenticate = vi.fn(async () => ({ ok: true, self: baseSelf }));
+    const r = await authorize({ username: '   ', password: 'pw', domain: 'demovoice' }, deps({ auth: { authenticate } } as any));
+    expect(r.status).toBe(403);
+    expect(authenticate).not.toHaveBeenCalled();
   });
 });
 

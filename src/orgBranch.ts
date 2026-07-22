@@ -59,6 +59,13 @@ export type RtDomainLookup =
  * org's would need a sweep of every org's branches on an unauthenticated request, which is exactly the
  * shape of request not worth spending API calls on; `SSO_RT_DOMAIN_MAP` covers that case explicitly.
  */
+/**
+ * A branch `address` is a SIP destination, so it may carry a `:port` — several do in the wild, and an
+ * operator may add one at any time. A NetSapiens domain never contains a colon, so the port is stripped
+ * rather than allowed to travel into a login username or to make one address look like two.
+ */
+const addressToDomain = (address: string): string => address.trim().replace(/:\d+$/, '');
+
 export async function resolveNsDomainByRtDomain(read: OrgBranchReader, rtDomain: string): Promise<RtDomainLookup> {
   const want = rtDomain.trim().toLowerCase();
   if (!want) return { ok: false, reason: 'not-found' };
@@ -71,7 +78,7 @@ export async function resolveNsDomainByRtDomain(read: OrgBranchReader, rtDomain:
   for (const org of candidates) {
     const branches = await read.getBranches(String(org.id));
     for (const b of branches) {
-      const address = str(b.address);
+      const address = addressToDomain(str(b.address));
       if (!address) continue;
       // A branch with its OWN domain answers only for that domain; one without inherits its org's,
       // which already matched. This keeps a multi-branch org from resolving every branch to `want`.

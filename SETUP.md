@@ -89,6 +89,14 @@ that same domain, the check is settled by that fact directly (`domainCheck: 'ok-
 When `domain` is absent the check is simply skipped (`domainCheck: 'skipped-not-supplied'`) and the
 self-derived domain governs everything downstream, same as always.
 
+> ⚠️ **Cutover note.** The day your integration starts populating `domain`, this check goes from *never
+> running* to *running on every request* — so verify what Ringotel actually sends before the template
+> changes, not after. If it is anything other than the organization domain your org/branch carries, every
+> login for that tenant returns 403 `domain-mismatch` at once. Two safety valves exist: an org or branch
+> with no Ringotel domain configured at all **skips** the check (`domainCheck: 'skipped-no-rt-domain'`)
+> rather than denying, and `SSO_RT_DOMAIN_MAP` entries are accepted as claims, so a mapping added for the
+> bare-extension lookup also satisfies the guard.
+
 This matters for `SSO_HEAL_DOMAINS`/`SSO_PROVISION_DOMAINS` below: they're matched against the
 self-derived domain, which is always the **full** NetSapiens domain (with territory suffix) — configure
 them with that full form, never the short label from `username`. `resolveOrgBranch`, eligibility, the
@@ -297,10 +305,24 @@ edge scale). The Worker has a rate limit for this built in — you only need to 
 **Why per-account, not per-IP.** The caller here is Ringotel's own infrastructure (or a proxy sitting
 in front of it), so every request — across every domain and every end user — arrives from a small, shared
 set of source IPs. A per-IP rule would throttle all of your users collectively the moment traffic gets
-busy. Instead the limiter is keyed on the **account being authenticated** — lowercased `domain:username`
-(`domain` half is empty when the request didn't supply one, which is the common case; never logged, only
-`domain` and the deny reason are) — so it scales to any number of domains/users while still capping how
-fast one attacker can grind through passwords for a single account.
+busy. Instead the limiter is keyed on the **account being authenticated**, so it scales to any number of
+domains/users while still capping how fast one attacker can grind through passwords for a single account.
+The key is the lowercased, trimmed `username` when it carries a domain (`101@example`), and
+`organizationDomain:extension` when it is a bare extension — a bare extension carries no tenant, so
+without the domain half `101` from every customer would share one bucket and a busy tenant could throttle
+an unrelated one. Neither is ever logged; only `domain` and the deny reason are.
+
+**One caveat on the bare-extension form:** the organization domain in that key comes from the request, and
+two spellings that resolve to the same tenant (an `SSO_RT_DOMAIN_MAP` alias and the org's real domain) are
+two buckets. Padding and casing cannot split them, but an alias can. It bounds one caller's grind rate; it
+is not a hard cap per account.
+
+**A second cost worth knowing:** a request that fails NetSapiens authentication can still have made
+Ringotel reads, because a bare extension must be resolved to a domain before there are credentials to
+check (one `getOrganizations`, plus one `getBranches` when an org matches). A flood of bare-extension
+requests therefore loads the Ringotel AdminAPI, not just NetSapiens — and if that key gets throttled,
+every login fails, including ones that would have succeeded. Requests using the `101@example` form skip
+that path entirely.
 
 **Wiring it up.** Add a [Workers Rate Limiting](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/)
 binding named `SSO_RATE_LIMITER` under `ratelimits` in your `wrangler.jsonc` (or `wrangler.local.jsonc`):

@@ -71,11 +71,14 @@ export default {
       console.log(JSON.stringify({ outcome: 'deny', reason: 'bad-body-fields' }));
       return new Response('forbidden', { status: 403 });
     }
-    if (!input.username || !input.password) {
+    if (!input.username.trim() || !input.password) {
       console.log(JSON.stringify({ outcome: 'deny', reason: 'empty-credentials' }));
       return new Response('forbidden', { status: 403 });
     }
-    const domain = typeof input.domain === 'string' && input.domain ? input.domain : undefined;
+    // TRIMMED here, not just downstream: a whitespace-only value used to survive as truthy, which made
+    // the log record a cross-tenant check as having passed when it had nothing to compare, and gave the
+    // rate-limit key below a second spelling of the same tenant.
+    const domain = typeof input.domain === 'string' && input.domain.trim() ? input.domain.trim() : undefined;
 
     // Per-account rate limit (abuse control, not an auth control) — keyed on domain:username so it
     // stops a brute-forcer against one account without throttling all callers behind Ringotel's (or a proxy's)
@@ -93,8 +96,11 @@ export default {
       // IS part of which account is being attacked (it selects the credentials that get checked), so it
       // belongs in the key. A brute-forcer varying it is attacking a different account each time, which
       // is the thing the bucket is supposed to separate.
+      // Both halves normalised the same way the pipeline normalises them, so two spellings of one
+      // account cannot land in two buckets: an untrimmed domain half let a caller mint a fresh bucket
+      // per attempt with nothing but padding, which is the whole limit defeated.
       const rlUser = String(input.username).trim().toLowerCase();
-      const rlKey = rlUser.includes('@') ? rlUser : `${(domain ?? '').toLowerCase()}:${rlUser}`;
+      const rlKey = rlUser.includes('@') ? rlUser : `${(domain ?? '').trim().toLowerCase()}:${rlUser}`;
       try {
         const { success } = await env.SSO_RATE_LIMITER.limit({ key: rlKey });
         if (!success) {
