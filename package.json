@@ -1,6 +1,6 @@
 {
   "name": "ringotel-ns-sso",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Cloudflare Worker serving Ringotel SSO authenticate for NetSapiens orgs",

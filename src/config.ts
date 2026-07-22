@@ -126,6 +126,19 @@ export interface Env {
    * address, where the lookup fails closed rather than guessing which tenant was meant.
    */
   SSO_RT_DOMAIN_MAP?: string;
+  /**
+   * Seconds to cache the Ringotel ORGANIZATION LIST in the Cloudflare Cache API. Default `60`; `0`
+   * disables caching entirely.
+   *
+   * Resolving a bare extension needs that list *before* the caller's NetSapiens credentials are checked,
+   * so without a cache a flood of failing logins drives one full `getOrganizations` each onto the
+   * Ringotel AdminAPI — and a throttled API key fails every login, not just the abusive ones.
+   *
+   * The cost is staleness: for up to this long, an org created moments ago is invisible, so a login for a
+   * brand-new customer can fail and then succeed. Branch reads are never cached — they carry the
+   * `address` that binds a tenant.
+   */
+  SSO_ORG_CACHE_TTL?: string;
   RINGOTEL_EXCLUDE_NAMES?: string;
   RINGOTEL_EXCLUDE_EXTS?: string;
   RINGOTEL_EXCLUDE_EXTS_BY_DOMAIN?: string;
@@ -184,6 +197,8 @@ export interface Config {
   loginForm: LoginForm;
   /** Ringotel org domain (lowercased) → full NetSapiens domain. Checked before the live lookup. */
   rtDomainMap: Record<string, string>;
+  /** Seconds to cache the Ringotel organization list; 0 disables. */
+  orgCacheTtl: number;
   eligibility: EligibilityConfig;
   mapping: MappingConfig;
 }
@@ -362,6 +377,16 @@ function parseRtDomainMap(env: Env): Record<string, string> {
   return out;
 }
 
+/** Non-negative integer seconds; blank ⇒ 60. A typo must not silently disable an abuse control, so a
+ *  non-numeric or negative value is a startup error rather than a fallback to the default. */
+function parseOrgCacheTtl(v?: string): number {
+  const t = (v ?? '').trim();
+  if (!t) return 60;
+  const n = Number(t);
+  if (!Number.isFinite(n) || n < 0) throw new ConfigError(`SSO_ORG_CACHE_TTL must be a non-negative number of seconds (got "${v}")`);
+  return Math.floor(n);
+}
+
 function parseWriteIdentity(env: Env): WriteIdentity {
   const user = (env.NS_ADMIN_USER ?? '').trim();
   const pass = (env.NS_ADMIN_PASS ?? '').trim();
@@ -402,6 +427,7 @@ export function parseConfig(env: Env): Config {
     requireEmail: parseRequireEmail(env.SSO_REQUIRE_EMAIL),
     loginForm: parseLoginForm(env.SSO_LOGIN_FORM),
     rtDomainMap: parseRtDomainMap(env),
+    orgCacheTtl: parseOrgCacheTtl(env.SSO_ORG_CACHE_TTL),
     eligibility: parseEligibility(env),
     mapping: parseMapping(env),
   };

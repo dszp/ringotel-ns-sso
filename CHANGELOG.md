@@ -5,7 +5,7 @@ All notable changes to `ringotel-ns-sso` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-07-22
 
 ### Added
 
@@ -45,6 +45,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A branch address carrying a `:port` (a SIP destination, which a NetSapiens domain never is) resolves to
   the domain without it, instead of carrying the port into a login username or making one address look
   like two.
+
+### Security
+
+- **The Ringotel organization list is cached briefly** (`SSO_ORG_CACHE_TTL`, default 60s, `0` disables).
+  Resolving a bare extension reads it before the caller's NetSapiens credentials are checked, so an
+  unauthenticated flood could otherwise drive that read onto the Ringotel AdminAPI at request rate — and a
+  throttled API key fails every login, not just the abusive ones. Branch and user reads stay live. The key
+  is namespaced by a hash of the API token, so two Workers sharing a zone cannot read each other's fleet.
+- The per-account rate-limit key is now normalised on both halves. Previously the caller-supplied domain
+  half was not trimmed, so padding alone minted a fresh bucket per attempt against the same account.
 
 ## [0.1.3] - 2026-07-22
 
@@ -160,3 +170,9 @@ Initial release.
   for why running it inline was rejected.
 - `SSO_REQUIRE_EMAIL` and `SSO_SEND_ACTIVATION_EMAIL` are deployment-wide; they have no per-domain
   override.
+
+[0.2.0]: https://github.com/dszp/ringotel-ns-sso/compare/v0.1.3...v0.2.0
+[0.1.3]: https://github.com/dszp/ringotel-ns-sso/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/dszp/ringotel-ns-sso/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/dszp/ringotel-ns-sso/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/dszp/ringotel-ns-sso/releases/tag/v0.1.0

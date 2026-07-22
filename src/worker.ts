@@ -2,6 +2,7 @@ import { parseConfig, type Env } from './config.js';
 import { authorize } from './authorize.js';
 import { buildDeps } from './clients.js';
 import { runDeviceRepair } from './repair.js';
+import type { CacheLike } from './orgCache.js';
 
 /** Constant-time-ish string compare (avoids trivial early-exit timing on the Basic secret). Intentionally
  *  leaks only credential LENGTH via the length-mismatch fast path below — acceptable for this threat
@@ -115,7 +116,12 @@ export default {
     }
 
     try {
-      const deps = buildDeps(config);
+      // `caches` is absent in some runtimes (and in unit tests); the cache layer treats that as "no
+      // cache" rather than an error. ctx.waitUntil keeps the cache WRITE off the login's response path.
+      // `caches.default` is a Workers extension; the WebWorker lib's CacheStorage type does not declare
+      // it, hence the narrow cast rather than a lib change.
+      const cache = typeof caches !== 'undefined' ? (caches as unknown as { default?: CacheLike }).default : undefined;
+      const deps = buildDeps(config, fetch, { cache, waitUntil: (p) => ctx.waitUntil(p) });
       const result = await authorize({ username: input.username, password: input.password, domain }, deps);
       console.log(JSON.stringify(result.log));
       if (result.status !== 200) return new Response('forbidden', { status: 403 });
