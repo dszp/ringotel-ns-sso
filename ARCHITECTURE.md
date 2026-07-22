@@ -109,6 +109,13 @@ that can *increase what you are billed for*, which is why it is gated hardest. N
 not a judgement about who deserves an app — it exists so activation has somewhere to send credentials, and
 `SSO_REQUIRE_EMAIL` defaults to enforcing it only when an email will actually be sent.
 
+The waiver is expressed *to* the shared engine rather than applied after it: `SSO_REQUIRE_EMAIL` and
+`SSO_SEND_ACTIVATION_EMAIL` decide whether to pass `EligContext.emailNotRequired`, and the library returns
+`EligResult.emailWaived` when it actually waived. This matters because the same predicate runs in other
+consumers of that library — expressing the rule as an input keeps one implementation deciding, so identical
+inputs cannot produce different verdicts in different places. It stays deliberately narrow: only the email
+check is waived, so a precondition added to the library later is not silently bypassed along with it.
+
 *Technically:* ensure the NetSapiens softphone device `<ext><suffix>` exists (create if absent) and read
 its generated SIP registration password, then `createUser` in Ringotel — `username`/`authname` set to the
 device name, that SIP password, `status: 1`, plus the display name and email taken from the NetSapiens
