@@ -1,5 +1,6 @@
 import type { EligibilityConfig, SoftCategory } from '@dszp/netsapiens-lib';
 import type { MappingConfig } from '@dszp/ringotel-lib';
+import type { LoginForm } from './login.js';
 
 export class ConfigError extends Error {}
 
@@ -105,6 +106,26 @@ export interface Env {
    */
   SSO_REQUIRE_EMAIL?: string;
   SSO_DOMAIN_MAP?: string;
+  /**
+   * How a username backfilled from an organization domain is spelled: `auto` (default) tries the SHORT
+   * form `<ext>@<first label>` and falls back to `<ext>@<full NS domain>`; `short` and `full` pin one.
+   *
+   * Only consulted when the user typed a bare extension — a username that already carries a domain is
+   * always used verbatim. Pin it if your core stores one form and you would rather not spend a failed
+   * grant discovering that (failed grants count against NetSapiens lockout policy).
+   */
+  SSO_LOGIN_FORM?: string;
+  /**
+   * Explicit Ringotel-org-domain → **full NetSapiens domain** overrides, as JSON:
+   * `{"acmevoice": "acme.12345.service"}`. Checked before the live lookup.
+   *
+   * The live lookup answers from Ringotel's own data (an org whose `domain` matches, and the `address`
+   * on its branch), which covers the ordinary case. This exists for the two it cannot: a branch whose
+   * domain differs from its org's (finding it would mean sweeping every org's branches on an
+   * unauthenticated request), and a Ringotel domain that legitimately answers for more than one branch
+   * address, where the lookup fails closed rather than guessing which tenant was meant.
+   */
+  SSO_RT_DOMAIN_MAP?: string;
   RINGOTEL_EXCLUDE_NAMES?: string;
   RINGOTEL_EXCLUDE_EXTS?: string;
   RINGOTEL_EXCLUDE_EXTS_BY_DOMAIN?: string;
@@ -159,6 +180,10 @@ export interface Config {
   sendActivationEmail: boolean;
   /** Require an email address to auto-provision: 'auto' follows sendActivationEmail. */
   requireEmail: 'auto' | 'always' | 'never';
+  /** Spelling used when backfilling a bare extension into an NS login username. */
+  loginForm: LoginForm;
+  /** Ringotel org domain (lowercased) → full NetSapiens domain. Checked before the live lookup. */
+  rtDomainMap: Record<string, string>;
   eligibility: EligibilityConfig;
   mapping: MappingConfig;
 }
@@ -311,6 +336,32 @@ function parseMapping(env: Env): MappingConfig {
   return { rules };
 }
 
+/** `auto` (default) | `short` | `full`. A typo would silently change which username spelling is tried,
+ *  so it fails closed at parse time rather than falling back to the default. */
+function parseLoginForm(v?: string): LoginForm {
+  const t = (v ?? '').trim().toLowerCase();
+  if (!t) return 'auto';
+  if (t === 'auto' || t === 'short' || t === 'full') return t;
+  throw new ConfigError(`SSO_LOGIN_FORM must be one of auto|short|full (got "${v}")`);
+}
+
+/** Ringotel org domain → full NS domain. Keys are lowercased so a caller's casing can never miss a rule. */
+function parseRtDomainMap(env: Env): Record<string, string> {
+  const raw = (env.SSO_RT_DOMAIN_MAP ?? '').trim();
+  if (!raw) return {};
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch { throw new ConfigError('SSO_RT_DOMAIN_MAP is not valid JSON'); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new ConfigError('SSO_RT_DOMAIN_MAP must be a JSON object of ringotelDomain→netsapiensDomain');
+  }
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof v !== 'string' || !v.trim()) throw new ConfigError('SSO_RT_DOMAIN_MAP values must be non-empty NetSapiens domains');
+    out[k.trim().toLowerCase()] = v.trim();
+  }
+  return out;
+}
+
 function parseWriteIdentity(env: Env): WriteIdentity {
   const user = (env.NS_ADMIN_USER ?? '').trim();
   const pass = (env.NS_ADMIN_PASS ?? '').trim();
@@ -349,6 +400,8 @@ export function parseConfig(env: Env): Config {
     blockExtsByDomain: parseByDomain(env.SSO_BLOCK_EXTS_BY_DOMAIN, 'SSO_BLOCK_EXTS_BY_DOMAIN'),
     sendActivationEmail: truthy(env.SSO_SEND_ACTIVATION_EMAIL),
     requireEmail: parseRequireEmail(env.SSO_REQUIRE_EMAIL),
+    loginForm: parseLoginForm(env.SSO_LOGIN_FORM),
+    rtDomainMap: parseRtDomainMap(env),
     eligibility: parseEligibility(env),
     mapping: parseMapping(env),
   };

@@ -57,11 +57,12 @@ export default {
     }
     // (M7) Validate field TYPES explicitly rather than relying on a thrown exception downstream (e.g. a
     // numeric/object `domain` reaching `.toLowerCase()`/`.trim()` calls in authorize.ts/orgBranch.ts).
-    // `domain` is OPTIONAL — Ringotel's real SSO webhook sends only `username`+`password` (confirmed
-    // live: its SSO service definition's `$domain$` placeholder resolves to nothing). The NetSapiens
-    // domain instead comes from the `<ext>@<short-domain>` shape of `username` and, authoritatively,
-    // from the NS self-record inside `authorize()`. So: present-and-non-string → 403; absent/null/empty
-    // → valid, and `undefined` is what's passed through to `authorize`.
+    // `domain` is OPTIONAL. When Ringotel sends it, it is Ringotel's own ORG domain — the value its
+    // sign-in screen asks for; Ringotel does not know the NetSapiens domain and cannot send it. It lets
+    // a user type a bare extension (authorize.ts resolves the org domain back to a NetSapiens domain and
+    // builds the login from it) and is cross-checked against the authenticated user's tenant. Identity
+    // still comes from the NS self-record, never from this field. So: present-and-non-string → 403;
+    // absent/null/empty → valid, and `undefined` is what's passed through to `authorize`.
     if (typeof input.username !== 'string' || typeof input.password !== 'string') {
       console.log(JSON.stringify({ outcome: 'deny', reason: 'bad-body-fields' }));
       return new Response('forbidden', { status: 403 });
@@ -82,11 +83,18 @@ export default {
     // into a 500 — a missing/broken binding must not block auth. `domain` may be absent (see above); the
     // key still stays per-account via the username half.
     if (env.SSO_RATE_LIMITER) {
-      // Keyed on the USERNAME alone. It deliberately does NOT include the request body's `domain`: that
-      // field is caller-controlled, so varying it per attempt would mint a fresh bucket for the same
-      // account and defeat the entire point of a per-account limit. The username already carries the
-      // tenant (`<ext>@<label>`), and it is the value the brute-forcer is actually iterating against.
-      const rlKey = String(input.username).trim().toLowerCase();
+      // Keyed on the USERNAME, which normally already carries the tenant (`<ext>@<label>`) and is the
+      // value a brute-forcer iterates against. The body's `domain` is deliberately NOT mixed in there:
+      // it is caller-controlled, so varying it would mint a fresh bucket for the same account and defeat
+      // the entire point of a per-account limit.
+      //
+      // The exception is a BARE extension, which carries no tenant — `1045` from every domain would
+      // otherwise share one bucket, so a busy tenant would throttle an unrelated one. There the domain
+      // IS part of which account is being attacked (it selects the credentials that get checked), so it
+      // belongs in the key. A brute-forcer varying it is attacking a different account each time, which
+      // is the thing the bucket is supposed to separate.
+      const rlUser = String(input.username).trim().toLowerCase();
+      const rlKey = rlUser.includes('@') ? rlUser : `${(domain ?? '').toLowerCase()}:${rlUser}`;
       try {
         const { success } = await env.SSO_RATE_LIMITER.limit({ key: rlKey });
         if (!success) {

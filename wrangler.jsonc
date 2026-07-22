@@ -15,6 +15,8 @@
     "SSO_PROVISION_DOMAINS": "",// "*" | CSV | "" (off)
     "SSO_REPAIR_DOMAINS": "",   // "*" | CSV | "" (off)
     "SSO_PATHS": "",            // CSV of POST paths; "" = just /authorize
+    "SSO_LOGIN_FORM": "",       // auto (default) | short | full — spelling used when backfilling a bare extension
+    "SSO_RT_DOMAIN_MAP": "",    // optional JSON: Ringotel org domain → FULL NetSapiens domain (reverse of SSO_DOMAIN_MAP)
     "SSO_BLOCK_DOMAINS": "",            // refuse login outright; blocks always beat allowlists
     "SSO_HEAL_BLOCK_DOMAINS": "",
     "SSO_PROVISION_BLOCK_DOMAINS": "",

@@ -61,7 +61,9 @@ Then: clone, `pnpm install`, copy `.dev.vars.example` to `.dev.vars` and fill in
 non-secret variables in `wrangler.jsonc`, and `pnpm dev` to run locally or `pnpm deploy` to ship it.
 Point Ringotel's SSO webhook at the Worker with the Basic credential you configured — at `/authorize`, or
 at whatever path your integration already uses, since `SSO_PATHS` accepts a list and can answer on both
-at once. The full reference — every secret and variable, the two write-identity options, allow/block
+at once. If the request template includes Ringotel's organization domain, your users can sign in with
+just their extension; without it they use the `<extension>@<domain>` form. Either way the Worker takes
+identity from NetSapiens, never from the request. The full reference — every secret and variable, the two write-identity options, allow/block
 semantics, and the proxy-to-direct migration path — is in **[SETUP.md](./SETUP.md)**.
 
 ## Pairs with `ns-portal-kit` — but neither needs the other

@@ -51,15 +51,43 @@ but it resolves to nothing at send time — so don't configure anything that req
 set per integration by Ringotel, so yours may differ and may well populate `domain`. The Worker
 handles either.
 
-The NetSapiens domain instead lives inside `username`, as `<extension>@<short-domain>` (e.g.
+The NetSapiens domain normally lives inside `username`, as `<extension>@<short-domain>` (e.g.
 `101@example`) — note that's the **short** label, without the territory suffix, so it will never equal
 the full NetSapiens domain (`example.12345.service`) and must not be used as a substitute for it. The
 Worker never derives identity from `username`'s domain portion either: the authoritative extension and
 domain always come from the caller's own NS self-record (`GET /domains/~/users/~`), fetched after the NS
-credential check succeeds. If a caller *does* supply `domain` in the body, it's cross-checked against that
-self-record (mismatch → 403 `domain-mismatch`); if it's absent, that check is simply skipped
-(`domainCheck: 'skipped-not-supplied'` in the log) and the self-derived domain governs everything
-downstream, same as always.
+credential check succeeds.
+
+### When `domain` is sent, it is the **Ringotel organization domain**
+
+The app's sign-in screen asks for an organization domain, and that is a Ringotel value — Ringotel has no
+way to know your NetSapiens domain, so it can only ever send its own. The Worker uses it for two things,
+neither of which makes it identity:
+
+**1. A bare extension becomes a usable login.** If `username` has no `@`, it is not a username at all
+until a tenant is known. The Worker resolves the organization domain back to the NetSapiens domain — the
+`address` on the matching Ringotel branch — and builds the NetSapiens login from it, trying
+`<ext>@<first label>` and then `<ext>@<full domain>` (see `SSO_LOGIN_FORM`). This is the one step that
+reads from Ringotel before any credential has been checked; it reads only, and its result decides *which
+credentials get verified*, never who the caller turns out to be. Your users can then sign in with either
+`101` or `101@example`.
+
+A bare extension with **no** `domain` is refused before any NetSapiens call (`no-domain-hint`): an
+extension is not globally unique, so any guess would be a guess about whose account to open. An
+organization domain that matches no org is `unknown-org-domain`; one that answers for more than one
+branch address is `ambiguous-org-domain`, refused rather than resolved to a guess — fix that with
+`SSO_RT_DOMAIN_MAP`.
+
+**2. It is still a cross-tenant guard.** After authentication, a supplied `domain` must name the tenant
+the user actually belongs to, or the login is refused with `domain-mismatch` — before any write and
+before any Ringotel user is read. Accepted spellings: the Ringotel organization domain (what Ringotel
+sends), the full NetSapiens domain, or that domain's first label, so a proxy or a manual test that sends
+a NetSapiens-shaped value is not rejected for being more specific than Ringotel can be. When the value
+was resolved to a NetSapiens domain before authentication and the credentials turned out to belong to
+that same domain, the check is settled by that fact directly (`domainCheck: 'ok-resolved'`).
+
+When `domain` is absent the check is simply skipped (`domainCheck: 'skipped-not-supplied'`) and the
+self-derived domain governs everything downstream, same as always.
 
 This matters for `SSO_HEAL_DOMAINS`/`SSO_PROVISION_DOMAINS` below: they're matched against the
 self-derived domain, which is always the **full** NetSapiens domain (with territory suffix) — configure
@@ -195,7 +223,9 @@ genuinely different policy per customer has to run more than one Worker, at leas
 > Worker deals with both: it matches config against the NetSapiens domain taken from the user's own
 > self-record, while the Ringotel org domain appears only in the success response (see "Request
 > contract"). The single exception is `SSO_DOMAIN_MAP`, whose *keys* are the NetSapiens domain's first
-> DNS label and whose *values* are Ringotel org keys — it exists precisely to bridge the two.
+> DNS label and whose *values* are Ringotel org keys — it exists precisely to bridge the two. Its mirror,
+> `SSO_RT_DOMAIN_MAP`, goes the other way (Ringotel org domain → full NetSapiens domain) and is used
+> before authentication, when a bare extension has to be turned into a NetSapiens login.
 
 
 | Key | Default | Purpose |
@@ -207,6 +237,8 @@ genuinely different policy per customer has to run more than one Worker, at leas
 | `SSO_PROVISION_DOMAINS` | empty (off) | **Full NetSapiens domains**, same `*` / CSV / empty semantics as above, for `provision` mode. **Empty ⇒ provisioning is off everywhere.** Provision beats heal beats validate when a domain is listed in both. |
 | `SSO_REPAIR_DOMAINS` | empty (off) | **Full NetSapiens domains**, same `*` / CSV / empty semantics as above. Domains where an **already-approved** login may repair a missing softphone device *after* the response has been sent (see ARCHITECTURE.md → "Post-response repair"). **Empty ⇒ repair is off everywhere.** Independent of heal/provision: it is the only mode that writes outside the request. |
 | `SSO_PATHS` | empty (`/authorize`) | Comma-separated request paths this Worker answers `POST` on. Ringotel's SSO service definition holds whatever endpoint URL was configured for **your** integration — often not `/authorize` (e.g. a proxy's `/webhook/<id>`), and changing it is a vendor-side support request. Accepting a **list** lets one deploy answer on the old and new paths at once, so moving traffic (e.g. retiring a proxy in front of this Worker) is a DNS change with an instant rollback rather than a flag day. Leading slashes and surrounding whitespace are normalised; a blank value falls back to `/authorize` rather than answering on nothing. `GET /health` is served regardless. |
+| `SSO_LOGIN_FORM` | `auto` | How a username backfilled from an organization domain is spelled: `auto` tries `<ext>@<first label>` and falls back to `<ext>@<full NetSapiens domain>`; `short` and `full` pin one. Only consulted when the user typed a **bare extension** — a username that already carries a domain is used verbatim. Pin it if you know which form your core stores: each wrong spelling is a failed password grant, and failed grants count against NetSapiens lockout policy. An unrecognised value is a startup error. |
+| `SSO_RT_DOMAIN_MAP` | empty | JSON overrides mapping a **Ringotel organization domain** to a **full NetSapiens domain**: `{"acmevoice": "acme.12345.service"}`. Checked before the live lookup, which normally answers from Ringotel's own data (an org whose `domain` matches, and the `address` on its branch). Use it for the two cases the lookup cannot serve: a branch whose domain differs from its org's (finding it would mean sweeping every org's branches on an unauthenticated request), and an organization domain that legitimately answers for more than one branch address, where the lookup refuses rather than guessing. Keys are case-insensitive. This is the **reverse** of `SSO_DOMAIN_MAP`. |
 | `SSO_SEND_ACTIVATION_EMAIL` | empty (**off**) | Whether an SSO-initiated activation sends Ringotel's credentials email. **Default: off.** A user who arrived via SSO authenticated with their NetSapiens credentials and is already inside the app, so the emailed app password is noise. Truthy (`1`/`true`/`yes`/`on`) turns it on — useful where users also sign in directly, or where the emailed QR code is the intended onboarding path. Drives Ringotel's `noemail` flag (inverted): the credentials email fires when a write carries **both** `status: 1` and an `email` field, which every heal/provision write here does, since it also syncs the NetSapiens name/email into the directory entry. |
 | `SSO_REQUIRE_EMAIL` | `auto` | Whether auto-provisioning requires the NetSapiens user to have an email address: `auto` \| `always` \| `never`. The rule exists because activation traditionally emails the credentials, so `auto` ties it to its own reason — an address is required exactly when `SSO_SEND_ACTIVATION_EMAIL` means one will be used. With the email suppressed (the default), a user without an address provisions normally. `always` keeps the requirement regardless, which is useful where a missing address is a deliberate marker for staff who should not get an app login. `never` drops it. **Only affects creation** — an existing user signs in, and is healed if inactive, either way. An unrecognised value is a startup error rather than a guess. **Deployment-wide only — there is currently no per-domain override for this setting**, unlike the heal/provision/repair allow/block pairs. If you need "no email = no app login" for some domains but not others, that isn't expressible yet. |
 | `SSO_BLOCK_DOMAINS` | empty (nothing blocked) | **Full NetSapiens domains** refused **outright** — a login is denied even though the NetSapiens credentials are valid, before mode selection or any Ringotel call. Same full-domain / `*` / CSV semantics as the allowlists. `*` is a kill switch for the whole deployment. Note this is evaluated *after* the NetSapiens credential check, because the domain comes from the user's own self-record and is never taken from the request. |

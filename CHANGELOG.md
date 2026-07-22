@@ -5,6 +5,38 @@ All notable changes to `ringotel-ns-sso` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Users can sign in with just their extension.** Ringotel's sign-in screen asks for an organization
+  domain; when the SSO request carries it, a `username` of a bare extension (`101`) is resolved into the
+  NetSapiens login it stands for, instead of being rejected as not a username. The organization domain is
+  looked up against Ringotel's own org/branch data to find the NetSapiens domain bound to it, and the
+  login is built from that — `<ext>@<first label>` first, then `<ext>@<full domain>`, configurable via
+  `SSO_LOGIN_FORM`. `101@example` keeps working exactly as before and needs no lookup.
+
+  This matters because **Ringotel does not know your NetSapiens domain and cannot send it** — the only
+  tenant hint available is its own organization domain, so nothing else could turn an extension into a
+  login. A bare extension with no organization domain is refused before any NetSapiens call: an extension
+  is not globally unique, and any guess would be a guess about whose account to open.
+
+  New: `SSO_RT_DOMAIN_MAP`, explicit organization-domain → NetSapiens-domain overrides, for a branch whose
+  domain differs from its org's and for an organization domain that answers for more than one branch
+  address (which the lookup refuses rather than resolving to a guess).
+
+### Changed
+
+- **The `domain` field in the request is now understood as the Ringotel organization domain.** It was
+  previously compared only against the NetSapiens domain, so a request carrying Ringotel's own value —
+  the one it is actually able to send — would have been refused as a cross-tenant attempt. The
+  cross-tenant guard is unchanged in strength and still refuses a value naming any other tenant, before
+  any write and before any Ringotel user is read; it now accepts the organization domain, the full
+  NetSapiens domain, or that domain's first label, since all three name the same tenant.
+- The per-account rate-limit key includes the organization domain when the username is a bare extension.
+  A bare extension carries no tenant, so `101` from every domain would otherwise share one bucket and a
+  busy tenant could throttle an unrelated one.
+
 ## [0.1.3] - 2026-07-22
 
 ### Changed

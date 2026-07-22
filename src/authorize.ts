@@ -1,7 +1,8 @@
 import { resolveCanonicalUser, type User, type Rec, type RingotelWriteClient } from '@dszp/ringotel-lib';
 import { evaluateEligibility, type EligUser } from '@dszp/netsapiens-lib';
 import type { Config } from './config.js';
-import { resolveOrgBranch, type OrgBranch, type OrgBranchReader } from './orgBranch.js';
+import { resolveOrgBranch, resolveNsDomainByRtDomain, type OrgBranch, type OrgBranchReader } from './orgBranch.js';
+import { parseLogin, loginCandidates, domainClaimMatches } from './login.js';
 import { modeFor, decide, healPermitted } from './decide.js';
 import { domainInList, domainAllowed, extBlocked } from './config.js';
 import type { RepairTask } from './repair.js';
@@ -9,10 +10,21 @@ import type { RepairTask } from './repair.js';
 /** NS device field carrying the auto-generated SIP registration password (v2). */
 export const SIP_PW_FIELD = 'device-sip-registration-password';
 
-// `domain` is OPTIONAL: Ringotel's real SSO webhook sends only `username`+`password` (confirmed live —
-// its SSO service definition's `$domain$` placeholder resolves to nothing). When present it is still
-// cross-checked against the NS self-record's domain below; when absent, the self-derived domain alone
-// is authoritative (identity NEVER comes from caller input, with or without this field).
+/**
+ * `domain` is OPTIONAL and, when sent, is the **Ringotel organization domain** — the value the app's
+ * sign-in screen asks for. Ringotel does not know the NetSapiens domain and can never send it.
+ *
+ * It does two jobs, neither of which makes it identity:
+ *  - **Backfill.** A username of a bare extension is meaningless on its own, so the org domain is looked
+ *    up to find which NetSapiens domain it belongs to, and the NS login is built from that. The caller's
+ *    value only ever selects *which credentials get checked* — the check itself still has to pass.
+ *  - **Cross-tenant guard.** After authentication it must name the tenant the authenticated user
+ *    actually belongs to (as its Ringotel domain, the NS domain, or that domain's first label), or the
+ *    login is refused before any write.
+ *
+ * After authentication the NS self-record remains the sole source of extension and domain, exactly as
+ * before. A `username` that already carries a domain (`1045@acme`) needs neither job and is used verbatim.
+ */
 export interface AuthorizeInput { username: string; password: string; domain?: string }
 
 interface WriteNs {
@@ -128,20 +140,92 @@ async function ensureDevice(ns: WriteNs, domain: string, ext: string, device: st
   return String(created[SIP_PW_FIELD] ?? '');
 }
 
+/**
+ * Memoize the two Ringotel reads for the life of one request. The reverse domain lookup and
+ * `resolveOrgBranch` both need the org list, and both need the branches of the org they land on — without
+ * this, a backfilled login pays for each of them twice. Nothing is cached across requests: a stale org
+ * list would resolve a login into a tenant that has since moved.
+ */
+function memoReader(read: OrgBranchReader): OrgBranchReader {
+  let orgs: Promise<Rec[]> | undefined;
+  const branches = new Map<string, Promise<Rec[]>>();
+  return {
+    getOrganizations: () => (orgs ??= read.getOrganizations()),
+    getBranches: (orgid: string) => {
+      const hit = branches.get(orgid);
+      if (hit) return hit;
+      const p = read.getBranches(orgid);
+      branches.set(orgid, p);
+      return p;
+    },
+  };
+}
+
 export async function authorize(input: AuthorizeInput, deps: AuthorizeDeps): Promise<AuthorizeResult> {
   const { config } = deps;
   const log: Record<string, unknown> = { domain: input.domain };
+  const read = memoReader(deps.read);
 
   // Memoized helper: mint the write client at most once (heal/provision device work + provision-create
   // both need it — see below).
   let _write: Awaited<ReturnType<typeof deps.getWrite>> | undefined;
   const getWrite = async () => (_write ??= await deps.getWrite());
 
+  // 0. Work out WHICH NetSapiens username to check. A username that already carries a domain
+  // (`1045@acme`) is used verbatim — the original and still the common case. A bare extension is not a
+  // username at all until a tenant is known, and the only tenant hint a Ringotel client can send is its
+  // own ORG domain, so that is resolved back to a NetSapiens domain first.
+  //
+  // This is the one step that touches Ringotel before any credential has been checked. It reads only,
+  // and its result decides which credentials get verified — never who the caller turns out to be.
+  const parsed = parseLogin(input.username);
+  let logins: string[];
+  // The NS domain the caller's claimed org domain was resolved TO, when it was resolved at all. It is
+  // the strongest form of the cross-tenant check: not "these two strings look like the same tenant" but
+  // "the tenant they named is the tenant they authenticated into".
+  let claimedNsDomain: string | undefined;
+  if (parsed.label) {
+    logins = [input.username.trim()];
+    log.loginForm = 'verbatim';
+  } else {
+    // No tenant in the username and none supplied ⇒ refuse here, before spending an NS call. An
+    // extension is not globally unique, so any guess would be a guess about whose account to open.
+    if (!input.domain) return { status: 403, log: { ...log, outcome: 'deny', reason: 'no-domain-hint' } };
+    const want = input.domain.trim().toLowerCase();
+    const mapped = config.rtDomainMap[want];
+    let nsDomain: string;
+    if (mapped) {
+      nsDomain = mapped;
+      log.rtDomainSource = 'map';
+    } else {
+      const found = await resolveNsDomainByRtDomain(read, want);
+      if (!found.ok) {
+        // Reported distinctly: 'ambiguous' means the Ringotel domain answers for more than one branch
+        // address, which SSO_RT_DOMAIN_MAP fixes; 'not-found' means no org carries that domain at all.
+        const reason = found.reason === 'ambiguous' ? 'ambiguous-org-domain' : 'unknown-org-domain';
+        return { status: 403, log: { ...log, outcome: 'deny', reason } };
+      }
+      nsDomain = found.nsDomain;
+      log.rtDomainSource = 'lookup';
+    }
+    log.resolvedNsDomain = nsDomain;
+    claimedNsDomain = nsDomain;
+    logins = loginCandidates(parsed.ext, nsDomain, config.loginForm);
+    log.loginForm = config.loginForm;
+  }
+
   // 1. Authenticate with the CALLER's own credentials. This mints the user's own NS access token and
   // reads their self-record (GET /domains/~/users/~ with that token) — never an admin-token lookup, and
-  // never anything derived from the caller-supplied `input.domain` yet. A bad login is rejected before
-  // any Ringotel or org-branch call is made.
-  const a = await deps.auth.authenticate(input.username, input.password);
+  // never anything derived from the caller-supplied `input.domain` beyond WHICH username was offered.
+  // A bad login is rejected before any further Ringotel or org-branch call is made.
+  //
+  // At most two spellings are tried, and only for a backfilled username (see loginCandidates): each
+  // wrong attempt is a failed grant, and failed grants count against the core's lockout policy.
+  let a: { ok: boolean; self?: Rec } = { ok: false };
+  for (const candidate of logins) {
+    a = await deps.auth.authenticate(candidate, input.password);
+    if (a.ok && a.self) { log.loginUsed = candidate; break; }
+  }
   if (!a.ok || !a.self) return { status: 403, log: { ...log, outcome: 'deny', reason: 'bad-credentials' } };
   const self = a.self;
 
@@ -162,16 +246,26 @@ export async function authorize(input: AuthorizeInput, deps: AuthorizeDeps): Pro
     return { status: 403, log: { ...log, outcome: 'deny', reason: 'domain-blocked' } };
   }
 
-  // Cross-tenant guard: only runs when the caller actually supplied a `domain` (Ringotel's real webhook
-  // does not — see AuthorizeInput). When present, the user's real (self-reported) domain must match it —
-  // otherwise a valid credential in one domain could be used to operate on another domain's org/branch.
-  // When absent, there is nothing to cross-check; proceed using the self-derived `domain` alone, which
-  // is (and always was) the sole source of identity.
+  // Cross-tenant guard: only runs when the caller actually supplied a `domain`. When present it must
+  // name THIS user's tenant — otherwise a valid credential in one domain could be used to operate on
+  // another domain's org/branch. When absent, there is nothing to cross-check; proceed using the
+  // self-derived `domain` alone, which is (and always was) the sole source of identity.
+  //
+  // Ringotel sends its own ORG domain, which is not knowable from the NetSapiens record alone — it comes
+  // out of `resolveOrgBranch` below. So the guard is settled in two stages: a NetSapiens-shaped claim is
+  // accepted here, and anything else is carried forward and decided the moment the org is resolved,
+  // still well before any write or any 200.
+  let claimPending = false;
   if (input.domain) {
-    if (domain.toLowerCase() !== input.domain.toLowerCase()) {
-      return { status: 403, log: { ...log, outcome: 'deny', reason: 'domain-mismatch' } };
+    if (claimedNsDomain && claimedNsDomain.toLowerCase() === domain.toLowerCase()) {
+      // The claim was resolved to a NetSapiens domain before authentication, and that is the domain the
+      // credentials turned out to belong to. Nothing about the Ringotel-side spelling need be compared.
+      log.domainCheck = 'ok-resolved';
+    } else if (domainClaimMatches(input.domain, { nsDomain: domain })) {
+      log.domainCheck = 'ok';
+    } else {
+      claimPending = true;
     }
-    log.domainCheck = 'ok';
   } else {
     log.domainCheck = 'skipped-not-supplied';
   }
@@ -182,8 +276,19 @@ export async function authorize(input: AuthorizeInput, deps: AuthorizeDeps): Pro
   const email = firstEmail(self);
 
   // 2. Resolve org/branch (authoritative address match).
-  const ob: OrgBranch | null = await resolveOrgBranch(deps.read, domain, config.mapping);
+  const ob: OrgBranch | null = await resolveOrgBranch(read, domain, config.mapping);
   if (!ob) return { status: 403, log: { ...log, outcome: 'deny', reason: 'no-org-branch' } };
+
+  // Stage two of the cross-tenant guard (see above): the claim was not a NetSapiens spelling, so it has
+  // to be this tenant's RINGOTEL domain — the form Ringotel actually sends. Nothing has been written and
+  // no Ringotel user has been read at this point, so a refusal here is as clean as one before the org
+  // lookup; it simply could not be answered any earlier.
+  if (claimPending) {
+    if (!domainClaimMatches(input.domain!, { nsDomain: domain, rtDomain: ob.rtDomain })) {
+      return { status: 403, log: { ...log, outcome: 'deny', reason: 'domain-mismatch' } };
+    }
+    log.domainCheck = 'ok-rt';
+  }
 
   // 3. Read + classify the Ringotel records at this extension.
   const users = await deps.read.getUsers(ob.orgid, ob.branchid);

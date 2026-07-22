@@ -25,7 +25,14 @@ Ringotel/NetSapiens read+write clients — live in the two published libraries, 
 flowchart TD
     A["POST /authorize<br/>Basic auth + {username, password[, domain]}"] --> B{Basic credential<br/>matches config?}
     B -- no --> B401["401"]
-    B -- yes --> C["NS OAuth password-grant<br/>with the CALLER's own credentials"]
+    B -- yes --> A2{"username carries<br/>a domain?"}
+    A2 -- yes --> C
+    A2 -- "no (bare extension)" --> A3{"organization domain<br/>supplied?"}
+    A3 -- no --> D403z["403 no-domain-hint"]
+    A3 -- yes --> A4["SSO_RT_DOMAIN_MAP, else<br/>resolveNsDomainByRtDomain()<br/>org.domain → branch.address"]
+    A4 -- "no match / ambiguous" --> D403y["403 unknown- / ambiguous-org-domain"]
+    A4 -- resolved --> A5["build NS login<br/>&lt;ext&gt;@&lt;label&gt;, then &lt;ext&gt;@&lt;full domain&gt;"]
+    A5 --> C["NS OAuth password-grant<br/>with the CALLER's own credentials"]
     C -- fail --> D403a["403 bad-credentials"]
     C -- ok --> E["GET /domains/~/users/~<br/>with the caller's OWN token"]
     E --> F["extension + domain<br/>from NS's self-record<br/>(authoritative; caller-supplied domain never trusted)"]
@@ -254,11 +261,29 @@ anything**. In the integration this Worker was developed against, Ringotel sends
 `password` — that integration's service definition has a `$domain$` placeholder which resolves to
 nothing at send time. **That is one configuration, not a universal contract:** the request template is
 set per integration by Ringotel support, so another deployment may well receive a populated `domain`.
-The Worker works either way. When a caller does supply it, it is used for exactly one purpose: a cross-tenant sanity check, comparing it against the
-domain NetSapiens itself reports for the authenticated user (`self.domain` from
-`GET /domains/~/users/~`). When `domain` is absent, that check is simply skipped (recorded in the
-structured log as `domainCheck: 'skipped-not-supplied'`, vs `'ok'` when it ran) — identity was never
-sourced from it either way. Every downstream lookup — org/branch resolution, `getUsers`, eligibility,
+The Worker works either way. **When Ringotel does send it, the value is Ringotel's own ORGANIZATION
+domain** — Ringotel has no way to know your NetSapiens domain — and it is used for exactly two purposes,
+neither of which is authorization:
+
+1. **A lookup key, before authentication.** A `username` of a bare extension is not a username until a
+   tenant is known, so the organization domain is resolved back to a NetSapiens domain and the login is
+   built from that. This is the only step that reads Ringotel before a credential is checked. It reads
+   only; it creates nothing; and its output decides *which credentials are verified*, not who the caller
+   is. A wrong or hostile value cannot authenticate anyone — it can only send the password check at a
+   username that will fail. Identity still comes from the self-record afterwards, exactly as before.
+   A bare extension with no organization domain is refused outright, and an organization domain that
+   answers for more than one branch address is refused rather than resolved to a guess: picking one
+   would route a login into a tenant the caller never named.
+2. **A cross-tenant sanity check, after authentication.** The claim must name the tenant the
+   authenticated user actually belongs to — as its Ringotel organization domain, the full NetSapiens
+   domain, or that domain's first label. Anything else is `domain-mismatch`, refused before any write and
+   before any Ringotel user is read. Where the claim was already resolved to a NetSapiens domain and the
+   credentials proved to belong to that same domain, the check is settled by that fact
+   (`domainCheck: 'ok-resolved'`) rather than by comparing spellings.
+
+When `domain` is absent, the check is simply skipped (recorded in the structured log as
+`domainCheck: 'skipped-not-supplied'`, vs `'ok'` / `'ok-rt'` / `'ok-resolved'` when it ran) — identity was
+never sourced from it either way. Every downstream lookup — org/branch resolution, `getUsers`, eligibility,
 mode selection — uses `self.domain`, the value NetSapiens authoritatively attached to the credential that
 was just verified. A caller cannot get org/branch resolution, user classification, or a write to run
 against a domain other than the one their own verified credentials belong to, no matter what the request
