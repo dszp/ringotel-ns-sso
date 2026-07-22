@@ -2,7 +2,7 @@ import { resolveCanonicalUser, type User, type Rec, type RingotelWriteClient } f
 import { evaluateEligibility, type EligUser } from '@dszp/netsapiens-lib';
 import type { Config } from './config.js';
 import { resolveOrgBranch, resolveNsDomainByRtDomain, type OrgBranch, type OrgBranchReader } from './orgBranch.js';
-import { parseLogin, loginCandidates, domainClaimMatches } from './login.js';
+import { parseLogin, loginCandidates, domainClaimMatches, logSafeAttempt } from './login.js';
 import { modeFor, decide, healPermitted } from './decide.js';
 import { domainInList, domainAllowed, extBlocked } from './config.js';
 import type { RepairTask } from './repair.js';
@@ -183,6 +183,11 @@ export async function authorize(input: AuthorizeInput, deps: AuthorizeDeps): Pro
   // This is the one step that touches Ringotel before any credential has been checked. It reads only,
   // and its result decides which credentials get verified — never who the caller turns out to be.
   const parsed = parseLogin(input.username);
+  // What the caller TYPED, recorded log-safely (see logSafeAttempt: the domain half verbatim, the
+  // extension half only when it looks like an extension). Set before authentication so it is present on
+  // every refusal — the rows where it is the only identity there is, since a failed login never reaches
+  // the NetSapiens self-record that `ext`/`domain` come from on the rows below.
+  log.attempt = logSafeAttempt(input.username);
   let logins: string[];
   // The NS domain the caller's claimed org domain was resolved TO, when it was resolved at all. It is
   // the strongest form of the cross-tenant check: not "these two strings look like the same tenant" but

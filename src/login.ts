@@ -78,3 +78,41 @@ export function domainClaimMatches(claim: string, tenant: { nsDomain: string; rt
   if (tenant.rtDomain) forms.push(tenant.rtDomain.trim().toLowerCase());
   return forms.includes(c);
 }
+
+/**
+ * A LOG-SAFE rendering of what the caller tried to sign in as.
+ *
+ * The operational question — "who is failing to log in, and against which tenant?" — needs the username,
+ * and a failed login is exactly where it is worth having. But the username field is also where people
+ * occasionally type their PASSWORD by mistake, and a password written into a searchable log store is a
+ * much worse outcome than a missing diagnostic.
+ *
+ * So the two halves are treated differently:
+ *  - the DOMAIN half is logged when it is DOMAIN-SHAPED. It names a tenant, not a person, and it is the
+ *    signal that actually matters when a whole customer starts failing — but it cannot be exempt from
+ *    checking: `p@$$w0rd` splits into ext `p` and "domain" `$$w0rd`, so a password containing an `@`
+ *    would have written its own tail into the log verbatim. (Found by the test that asserted a
+ *    password-shaped input is never recorded — it was, in the other half.)
+ *  - the EXTENSION half is logged verbatim only when it is USERNAME-SHAPED: letters, digits, dot,
+ *    underscore or hyphen, and short. Anything else is reduced to its shape — enough to see "somebody
+ *    typed their email address" or "somebody is trying long random strings", and never the value.
+ *
+ * The shape test is what a password usually fails: symbols, spaces, punctuation, or length. It is a
+ * filter, not a proof — a short all-alphanumeric password typed into the username field would still be
+ * recorded. Tightening it further (rejecting mixed case with digits, say) starts rejecting real
+ * usernames like `JohnDoe123`, which is the wrong trade for a diagnostic field. What is guaranteed is
+ * that the PASSWORD field is never logged in any form, anywhere.
+ */
+const USERNAME_SHAPED = /^[A-Za-z0-9][A-Za-z0-9._-]{0,19}$/;
+/** Hostname characters only. Deliberately allows a full NS domain (`acme.12345.service`). */
+const DOMAIN_SHAPED = /^[A-Za-z0-9][A-Za-z0-9.-]{0,63}$/;
+
+const shaped = (value: string, re: RegExp): string => (re.test(value) ? value : `other(len=${value.length})`);
+
+export function logSafeAttempt(username: string): { ext: string; domain?: string } {
+  const { ext, label } = parseLogin(username);
+  return {
+    ext: shaped(ext, USERNAME_SHAPED),
+    ...(label ? { domain: shaped(label, DOMAIN_SHAPED) } : {}),
+  };
+}

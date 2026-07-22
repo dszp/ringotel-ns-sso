@@ -5,6 +5,22 @@ All notable changes to `ringotel-ns-sso` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Failed logins now record what was attempted.** Every log line carries an `attempt` object with the
+  extension and domain the caller typed — on a refusal that is the only identity available, since no
+  self-record was ever read, which previously made "who is failing, and against which tenant?"
+  unanswerable from the logs.
+
+  Both halves are shape-checked before being recorded — the extension half must be username-shaped, the
+  domain half hostname-shaped, and anything else becomes `other(len=N)`. The username field is where
+  people occasionally type their password by mistake, and a password in a searchable log store is a worse
+  outcome than a missing diagnostic. A filter, not a proof: a short all-alphanumeric password would still
+  be recorded, while tightening further would start rejecting real usernames. The password field itself is
+  never logged in any form.
+
 ## [0.2.0] - 2026-07-22
 
 ### Added
@@ -171,6 +187,7 @@ Initial release.
 - `SSO_REQUIRE_EMAIL` and `SSO_SEND_ACTIVATION_EMAIL` are deployment-wide; they have no per-domain
   override.
 
+[Unreleased]: https://github.com/dszp/ringotel-ns-sso/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/dszp/ringotel-ns-sso/compare/v0.1.3...v0.2.0
 [0.1.3]: https://github.com/dszp/ringotel-ns-sso/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/dszp/ringotel-ns-sso/compare/v0.1.1...v0.1.2

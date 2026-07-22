@@ -5,7 +5,7 @@
  * covers the pipeline they feed.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { parseLogin, loginCandidates, domainClaimMatches, firstLabel } from './login.js';
+import { parseLogin, loginCandidates, domainClaimMatches, firstLabel, logSafeAttempt } from './login.js';
 import { resolveNsDomainByRtDomain } from './orgBranch.js';
 import { authorize, type AuthorizeDeps } from './authorize.js';
 import { parseConfig, ConfigError, type Env } from './config.js';
@@ -67,6 +67,49 @@ describe('domainClaimMatches', () => {
   it('without a resolved Ringotel domain, only the NetSapiens spellings can match', () => {
     expect(domainClaimMatches('acmevoice', { nsDomain: 'acme.12345.service' })).toBe(false);
     expect(domainClaimMatches('acme', { nsDomain: 'acme.12345.service' })).toBe(true);
+  });
+});
+
+describe('logSafeAttempt', () => {
+  it('records an extension and its domain, which is the question worth answering', () => {
+    expect(logSafeAttempt('1045@acme')).toEqual({ ext: '1045', domain: 'acme' });
+    expect(logSafeAttempt('1045')).toEqual({ ext: '1045' });
+  });
+
+  it('records a username-shaped value, so non-numeric deployments are not blind', () => {
+    // Letters, digits, dot, underscore, hyphen — the shapes a real login username takes.
+    expect(logSafeAttempt('j.doe@acme').ext).toBe('j.doe');
+    expect(logSafeAttempt('reception_2').ext).toBe('reception_2');
+    expect(logSafeAttempt('desk-11').ext).toBe('desk-11');
+  });
+
+  it('reduces anything a password typically looks like', () => {
+    // Symbols, spaces and length are what a password fails on. A filter, not a proof — but it keeps
+    // the common mistyped-password case out of a searchable log store.
+    expect(logSafeAttempt('hunter2!SecretPass').ext).toBe('other(len=18)');
+    expect(logSafeAttempt('correct horse battery').ext).toBe('other(len=21)');
+    // A password containing an `@` splits into two halves; NEITHER may be recorded verbatim.
+    expect(logSafeAttempt('p@$$w0rd')).toEqual({ ext: 'p', domain: 'other(len=6)' });
+    expect(JSON.stringify(logSafeAttempt('hunter2!SecretPass'))).not.toContain('hunter2');
+  });
+
+  it('reduces an email-shaped username but keeps its domain half', () => {
+    const a = logSafeAttempt('al@example.com');
+    expect(a).toEqual({ ext: 'al', domain: 'example.com' });
+  });
+
+  it('redacts a non-domain-shaped domain half too — the other place a secret could land', () => {
+    expect(logSafeAttempt('x@sec ret!').domain).toBe('other(len=8)');
+    // ...while a real NetSapiens domain, dots and all, is kept.
+    expect(logSafeAttempt('1045@acme.12345.service').domain).toBe('acme.12345.service');
+  });
+
+  it('rejects anything over the length cap, digits included', () => {
+    expect(logSafeAttempt('123456789012345678901').ext).toBe('other(len=21)');
+  });
+
+  it('is safe on empty input', () => {
+    expect(logSafeAttempt('   ')).toEqual({ ext: 'other(len=0)' });
   });
 });
 
@@ -365,6 +408,16 @@ describe('the cross-tenant guard after review', () => {
     const r = await authorize({ username: '100', password: 'pw', domain: 'demovoice' }, deps({ auth, read } as any));
     expect(tried).toEqual(['100@demo']);
     expect(r.log.resolvedNsDomain).toBe('demo.12345.service');
+  });
+
+  it('logs what was attempted on a FAILED login — the row where it is the only identity', async () => {
+    const r = await authorize(
+      { username: '1099@demo', password: 'wrong', domain: 'demovoice' },
+      deps({ auth: { authenticate: async () => ({ ok: false }) } } as any),
+    );
+    expect(r.status).toBe(403);
+    expect(r.log.reason).toBe('bad-credentials');
+    expect(r.log.attempt).toEqual({ ext: '1099', domain: 'demo' });
   });
 
   it('an empty extension yields no grant attempts at all', async () => {

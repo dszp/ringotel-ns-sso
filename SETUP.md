@@ -374,6 +374,31 @@ so it is indifferent to who calls it.
 
 
 
+## What ends up in the logs
+
+Each request emits one structured JSON line (Workers Logs, 7-day retention). The useful fields:
+
+| Field | Meaning |
+|---|---|
+| `outcome` | `allow` \| `deny` \| `error` |
+| `reason` | why a `deny` was refused — `bad-basic-auth`, `bad-credentials`, `domain-mismatch`, `no-domain-hint`, `unknown-org-domain`, `ambiguous-org-domain`, `domain-blocked`, `ext-blocked` |
+| `attempt` | what the caller TYPED: `{ ext, domain }` — present on every row, and the only identity a failed login has |
+| `ext` / `domain` | the authenticated user's real extension and NetSapiens domain, from their own self-record (successful auth only) |
+| `verdict` / `action` / `mode` | Ringotel record state, what was done about it, and what the domain's policy permits |
+| `domainCheck` | how the caller's `domain` claim was settled |
+| `loginForm` / `loginUsed` | which username spelling was used |
+
+**`attempt` is shape-checked before it is recorded.** The username field is where people occasionally
+type their *password* by mistake, and a password written into a searchable log store is a worse outcome
+than a missing diagnostic. So each half is kept only if it looks like what it claims to be — the
+extension half must be username-shaped (letters, digits, `.`, `_`, `-`, up to 20 characters) and the
+domain half hostname-shaped — and anything else becomes `other(len=N)`. That still distinguishes "someone
+typed their email address" from "someone is trying long random strings" without storing the value.
+
+It is a filter, not a proof: a short all-alphanumeric password typed into the username field would still
+be recorded. Tightening further starts rejecting real usernames, which is the wrong trade for a
+diagnostic field. **The password field itself is never logged in any form, anywhere.**
+
 ## Health check
 
 `GET /health` returns `200 ok` unauthenticated — safe for uptime monitoring; it does not exercise config
