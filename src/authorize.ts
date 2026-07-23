@@ -464,8 +464,11 @@ export async function authorize(input: AuthorizeInput, deps: AuthorizeDeps): Pro
     // NetSapiens is the source of truth for identity, so `email` is synced FAITHFULLY — including when it
     // is blank. An address removed in NetSapiens is a real change and must propagate; preserving a stale
     // Ringotel address because the authoritative record no longer has one would make the directory quietly
-    // disagree with the platform it mirrors. (Note the companion portal's `activate()` guards instead, only
-    // sending a non-empty address — a deliberate divergence, see that repo's HANDOFF.)
+    // disagree with the platform it mirrors — and that leftover address can receive the app password for
+    // an extension that has since been reassigned. (The companion portal used to guard instead, sending
+    // only a non-empty address; it was made faithful to match — 2026-07-23. Here `email` can only be a
+    // real value or a real blank: it comes from the user's OWN self-record, which was already read
+    // successfully by this point, so there is no failed-read case to distinguish.)
     await rt.updateUser(String(res.user.id), ob.orgid, {
       status: 1, username: device, authname: device, password, name, email,
       noemail: !config.sendActivationEmail,
