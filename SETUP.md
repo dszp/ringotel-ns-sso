@@ -25,13 +25,20 @@ All values below are **fictional placeholders** — `example.com`, `demo.12345.s
 **None of this is self-serve.** The SSO integration is configured on Ringotel's side by their support
 team, so budget for a conversation with them before this Worker can receive a single request:
 
-- **SSO is a PRO-package feature.** If the account isn't on it, there's nothing to configure.
+- **SSO is a PRO-package feature.** If the account isn't on it, there's nothing to configure. PRO can be
+  enabled **per organization**, and it generally carries an **additional per-user cost** — settle that with
+  Ringotel before anyone incurs charges.
 - **A white-labelled app may also be required** to expose the SSO configuration. This is *believed* to be
   the case but is **not confirmed** — treat it as a question for support rather than a documented fact.
 - **The request and response shapes are set per integration**, not fixed by a public spec: the endpoint
   URL, the auth method (Basic / Bearer / OAuth2), which fields the request body carries, and the
   `response_map` that turns this Worker's reply into a Ringotel session. Two deployments can legitimately
   see different shapes.
+- **The endpoint URL is yours to supply, not theirs to disclose.** For a *new* integration you choose the
+  URL — this Worker's default path is `/authorize` — and hand it to support along with the Basic
+  credential you generated. It is only an unknown when an integration already exists, in which case ask
+  what it posts to and add that path to `SSO_PATHS` rather than asking them to change it. Either way, a
+  later change to the configured URL is another support request.
 - **There is no published example of the exact shapes** at the time of writing — Ringotel's own docs
   describe the mechanism but not a worked request/response pair. That may improve; until it does, the
   authoritative answer for *your* integration is whatever support configured.
@@ -52,8 +59,10 @@ set per integration by Ringotel, so yours may differ and may well populate `doma
 handles either.
 
 The NetSapiens domain normally lives inside `username`, as `<extension>@<short-domain>` (e.g.
-`101@example`) — note that's the **short** label, without the territory suffix, so it will never equal
-the full NetSapiens domain (`example.12345.service`) and must not be used as a substitute for it. The
+`101@example`) — usually the **short** label, without the territory suffix, so it usually does *not* equal
+the stored NetSapiens domain (`example.12345.service`) and must not be used as a substitute for it. On a
+server whose domains are bare it happens to be the same string, and that is precisely why it cannot be
+relied on either way: when it matches, that is a coincidence rather than a rule. The
 Worker never derives identity from `username`'s domain portion either: the authoritative extension and
 domain always come from the caller's own NS self-record (`GET /domains/~/users/~`), fetched after the NS
 credential check succeeds.
@@ -98,9 +107,10 @@ self-derived domain governs everything downstream, same as always.
 > bare-extension lookup also satisfies the guard.
 
 This matters for `SSO_HEAL_DOMAINS`/`SSO_PROVISION_DOMAINS` below: they're matched against the
-self-derived domain, which is always the **full** NetSapiens domain (with territory suffix) — configure
-them with that full form, never the short label from `username`. `resolveOrgBranch`, eligibility, the
-cross-tenant check, and `createUser`'s `domain` field all use this same full NetSapiens domain too.
+self-derived domain, which is always the domain **as the server stores it** (often with a territory
+suffix) — configure them with that value, not with the label from `username`, which is only the same
+string on a server whose domains are bare. `resolveOrgBranch`, eligibility, the cross-tenant check, and
+`createUser`'s `domain` field all use that same stored NetSapiens domain too.
 
 **The success response's `domain` is different — it's the Ringotel org domain, not the NetSapiens one.**
 `200 { extension, authname, domain }`: `domain` here is the value Ringotel's own SSO `response_map`
@@ -225,9 +235,17 @@ genuinely different policy per customer has to run more than one Worker, at leas
 
 ## Vars (`wrangler.jsonc`)
 
-> **Which "domain"?** Every domain-valued setting below means the **full NetSapiens domain, with its
-> territory suffix** — e.g. `example.12345.service`. Not the short label a user types in `username`
-> (`101@example`), and **not** the Ringotel org domain. The two are frequently different, and the
+> **Which "domain"?** Every domain-valued setting below means the NetSapiens domain **exactly as your
+> NetSapiens server stores it**, often with a territory suffix — e.g. `example.12345.service`. It is **not**
+> the Ringotel org domain, and it is not "whatever the user typed": the Worker matches config against the
+> domain on the user's own self-record, so the stored value is the only one that counts.
+>
+> **Some real NetSapiens domains are bare** — no territory suffix at all, just `example`. That is common on
+> domains created before a reseller became a white-label partner, and **a domain cannot be renamed
+> afterwards**, so those persist indefinitely. Two consequences: do not "correct" a bare domain by
+> appending a suffix, and do not assume the short label inside a `username` must be wrong — on such a
+> server it is the whole domain. Read the value off the domain list or a user record rather than deriving
+> it. The two are frequently different, and the
 > Worker deals with both: it matches config against the NetSapiens domain taken from the user's own
 > self-record, while the Ringotel org domain appears only in the success response (see "Request
 > contract"). The single exception is `SSO_DOMAIN_MAP`, whose *keys* are the NetSapiens domain's first
@@ -241,25 +259,25 @@ genuinely different policy per customer has to run more than one Worker, at leas
 | `NS_SERVER` | *(required, no default)* | NetSapiens API host, e.g. `api.example.com`. Used for both v2 reads and device writes. |
 | `NS_OAUTH_SERVER` | blank ⇒ falls back to `NS_SERVER` | OAuth host, if it differs from `NS_SERVER` on your platform. |
 | `DEVICE_SUFFIX` | `r` | Appended to the extension to form the softphone device id and SIP `authname`, e.g. extension `101` → device/authname `101r`. |
-| `SSO_HEAL_DOMAINS` | empty (off) | **Full** NetSapiens domains (with territory suffix, e.g. `example.12345.service` — not the short label from `username`) where `heal` mode is enabled. `*` = all domains, or a CSV list (`a.12345.service,b.67890.service`, case-insensitive). **Empty ⇒ heal is off everywhere.** |
-| `SSO_PROVISION_DOMAINS` | empty (off) | **Full NetSapiens domains**, same `*` / CSV / empty semantics as above, for `provision` mode. **Empty ⇒ provisioning is off everywhere.** Provision beats heal beats validate when a domain is listed in both. |
-| `SSO_REPAIR_DOMAINS` | empty (off) | **Full NetSapiens domains**, same `*` / CSV / empty semantics as above. Domains where an **already-approved** login may repair a missing softphone device *after* the response has been sent (see ARCHITECTURE.md → "Post-response repair"). **Empty ⇒ repair is off everywhere.** Independent of heal/provision: it is the only mode that writes outside the request. |
+| `SSO_HEAL_DOMAINS` | empty (off) | NetSapiens domains **as stored** (often with a territory suffix, e.g. `example.12345.service`; bare domains exist — see the callout above) where `heal` mode is enabled. `*` = all domains, or a CSV list (`a.12345.service,b.67890.service`, case-insensitive). **Empty ⇒ heal is off everywhere.** |
+| `SSO_PROVISION_DOMAINS` | empty (off) | **NetSapiens domains as stored**, same `*` / CSV / empty semantics as above, for `provision` mode. **Empty ⇒ provisioning is off everywhere.** Provision beats heal beats validate when a domain is listed in both. |
+| `SSO_REPAIR_DOMAINS` | empty (off) | **NetSapiens domains as stored**, same `*` / CSV / empty semantics as above. Domains where an **already-approved** login may repair a missing softphone device *after* the response has been sent (see ARCHITECTURE.md → "Post-response repair"). **Empty ⇒ repair is off everywhere.** Independent of heal/provision: it is the only mode that writes outside the request. |
 | `SSO_PATHS` | empty (`/authorize`) | Comma-separated request paths this Worker answers `POST` on. Ringotel's SSO service definition holds whatever endpoint URL was configured for **your** integration — often not `/authorize` (e.g. a proxy's `/webhook/<id>`), and changing it is a vendor-side support request. Accepting a **list** lets one deploy answer on the old and new paths at once, so moving traffic (e.g. retiring a proxy in front of this Worker) is a DNS change with an instant rollback rather than a flag day. Leading slashes and surrounding whitespace are normalised; a blank value falls back to `/authorize` rather than answering on nothing. `GET /health` is served regardless. |
 | `SSO_LOGIN_FORM` | `auto` | How a username backfilled from an organization domain is spelled: `auto` tries `<ext>@<first label>` and falls back to `<ext>@<full NetSapiens domain>`; `short` and `full` pin one. Only consulted when the user typed a **bare extension** — a username that already carries a domain is used verbatim. Pin it if you know which form your core stores: each wrong spelling is a failed password grant, and failed grants count against NetSapiens lockout policy. An unrecognised value is a startup error. |
 | `SSO_RT_DOMAIN_MAP` | empty | JSON overrides mapping a **Ringotel organization domain** to a **full NetSapiens domain**: `{"acmevoice": "acme.12345.service"}`. Checked before the live lookup, which normally answers from Ringotel's own data (an org whose `domain` matches, and the `address` on its branch). Use it for the two cases the lookup cannot serve: a branch whose domain differs from its org's (finding it would mean sweeping every org's branches on an unauthenticated request), and an organization domain that legitimately answers for more than one branch address, where the lookup refuses rather than guessing. Keys are case-insensitive. This is the **reverse** of `SSO_DOMAIN_MAP`. |
 | `SSO_ORG_CACHE_TTL` | `60` | Seconds to cache the Ringotel **organization list** in the Cloudflare Cache API; `0` disables it. Resolving a bare extension reads that list *before* the caller's NetSapiens credentials are checked, so without a cache a flood of failing logins drives one `getOrganizations` each onto the Ringotel AdminAPI — and a throttled API key fails **every** login, not just the abusive ones. The cost is staleness: for up to this long an org created moments ago is invisible, so a login for a brand-new customer can fail and then succeed. Branch and user reads are never cached — a branch carries the `address` that binds a tenant, which is the value least worth serving stale. The cache key is namespaced by a hash of your API token (never the token itself), so two Workers on one zone cannot read each other's fleet. A non-numeric or negative value is a startup error rather than a silent fallback. |
 | `SSO_SEND_ACTIVATION_EMAIL` | empty (**off**) | Whether an SSO-initiated activation sends Ringotel's credentials email. **Default: off.** A user who arrived via SSO authenticated with their NetSapiens credentials and is already inside the app, so the emailed app password is noise. Truthy (`1`/`true`/`yes`/`on`) turns it on — useful where users also sign in directly, or where the emailed QR code is the intended onboarding path. Drives Ringotel's `noemail` flag (inverted): the credentials email fires when a write carries **both** `status: 1` and an `email` field, which every heal/provision write here does, since it also syncs the NetSapiens name/email into the directory entry. |
 | `SSO_REQUIRE_EMAIL` | `auto` | Whether auto-provisioning requires the NetSapiens user to have an email address: `auto` \| `always` \| `never`. The rule exists because activation traditionally emails the credentials, so `auto` ties it to its own reason — an address is required exactly when `SSO_SEND_ACTIVATION_EMAIL` means one will be used. With the email suppressed (the default), a user without an address provisions normally. `always` keeps the requirement regardless, which is useful where a missing address is a deliberate marker for staff who should not get an app login. `never` drops it. **Only affects creation** — an existing user signs in, and is healed if inactive, either way. An unrecognised value is a startup error rather than a guess. **Deployment-wide only — there is currently no per-domain override for this setting**, unlike the heal/provision/repair allow/block pairs. If you need "no email = no app login" for some domains but not others, that isn't expressible yet. |
-| `SSO_BLOCK_DOMAINS` | empty (nothing blocked) | **Full NetSapiens domains** refused **outright** — a login is denied even though the NetSapiens credentials are valid, before mode selection or any Ringotel call. Same full-domain / `*` / CSV semantics as the allowlists. `*` is a kill switch for the whole deployment. Note this is evaluated *after* the NetSapiens credential check, because the domain comes from the user's own self-record and is never taken from the request. |
-| `SSO_HEAL_BLOCK_DOMAINS` | empty | **Full NetSapiens domains**, or `*` for all. Refuses `heal` for these even when `SSO_HEAL_DOMAINS` would allow it. `*` here is **not** the same as emptying `SSO_HEAL_DOMAINS`: provision mode heals too, so `SSO_HEAL_BLOCK_DOMAINS="*"` alongside a broad provision allowlist means *create missing users, but never modify existing ones* — reactivation and sibling dedup are both refused. |
-| `SSO_PROVISION_BLOCK_DOMAINS` | empty | **Full NetSapiens domains.** Refuses `provision` for these even when `SSO_PROVISION_DOMAINS` would allow it. `*` blocks provisioning everywhere (equivalent to an empty `SSO_PROVISION_DOMAINS`). A blocked domain falls back to the next weaker mode (so blocking provisioning on a `*`-provision deployment leaves `heal`, if heal still permits it). |
-| `SSO_REPAIR_BLOCK_DOMAINS` | empty | **Full NetSapiens domains**, or `*` for all. Refuses post-response repair for these even when `SSO_REPAIR_DOMAINS` would allow it. `*` disables repair everywhere (equivalent to an empty `SSO_REPAIR_DOMAINS`). |
+| `SSO_BLOCK_DOMAINS` | empty (nothing blocked) | **NetSapiens domains as stored** refused **outright** — a login is denied even though the NetSapiens credentials are valid, before mode selection or any Ringotel call. Same domain / `*` / CSV semantics as the allowlists. `*` is a kill switch for the whole deployment. Note this is evaluated *after* the NetSapiens credential check, because the domain comes from the user's own self-record and is never taken from the request. |
+| `SSO_HEAL_BLOCK_DOMAINS` | empty | **NetSapiens domains as stored**, or `*` for all. Refuses `heal` for these even when `SSO_HEAL_DOMAINS` would allow it. `*` here is **not** the same as emptying `SSO_HEAL_DOMAINS`: provision mode heals too, so `SSO_HEAL_BLOCK_DOMAINS="*"` alongside a broad provision allowlist means *create missing users, but never modify existing ones* — reactivation and sibling dedup are both refused. |
+| `SSO_PROVISION_BLOCK_DOMAINS` | empty | **NetSapiens domains as stored.** Refuses `provision` for these even when `SSO_PROVISION_DOMAINS` would allow it. `*` blocks provisioning everywhere (equivalent to an empty `SSO_PROVISION_DOMAINS`). A blocked domain falls back to the next weaker mode (so blocking provisioning on a `*`-provision deployment leaves `heal`, if heal still permits it). |
+| `SSO_REPAIR_BLOCK_DOMAINS` | empty | **NetSapiens domains as stored**, or `*` for all. Refuses post-response repair for these even when `SSO_REPAIR_DOMAINS` would allow it. `*` disables repair everywhere (equivalent to an empty `SSO_REPAIR_DOMAINS`). |
 | `SSO_BLOCK_EXTS` | empty | Extensions that must **never gain a softphone device**, on any domain. CSV; a trailing `*` is a prefix wildcard (`90*` covers 900, 901, 9012…; a bare `*` blocks every extension everywhere). Blocks every device-creating path — `provision`, `heal`, **and** post-response `repair` — but deliberately does **not** refuse the login, so an extension that already has a working record keeps working. Distinct from `RINGOTEL_EXCLUDE_EXTS`, which is a *soft* rule gating auto-creation only and still permits heal and repair. |
-| `SSO_BLOCK_EXTS_BY_DOMAIN` | empty | JSON keyed by **full NetSapiens domain**, applying `add` then `remove` over `SSO_BLOCK_EXTS` — e.g. `{"one.12345.service": {"remove": ["900"]}}` to block an extension everywhere *except* one domain. Malformed JSON is a startup error, not a silent no-op. `remove` is matched with the **same wildcard semantics** as the block list, so a global `90*` can be exempted on one domain with `remove: ["900"]`. An unknown key, or a value listed in both `add` and `remove`, is a startup error rather than a silent no-op. |
+| `SSO_BLOCK_EXTS_BY_DOMAIN` | empty | JSON keyed by the **NetSapiens domain as stored**, applying `add` then `remove` over `SSO_BLOCK_EXTS` — e.g. `{"one.12345.service": {"remove": ["900"]}}` to block an extension everywhere *except* one domain. Malformed JSON is a startup error, not a silent no-op. `remove` is matched with the **same wildcard semantics** as the block list, so a global `90*` can be exempted on one domain with `remove: ["900"]`. An unknown key, or a value listed in both `add` and `remove`, is a startup error rather than a silent no-op. |
 | `SSO_DOMAIN_MAP` | empty | Optional JSON object mapping a NetSapiens domain's first DNS label to a Ringotel org key override, e.g. `{"legacy":"acme"}`. Only needed when the default (first-label-as-org-key) match doesn't hold. |
 | `RINGOTEL_EXCLUDE_NAMES` | *(see note)* | CSV of name substrings that soft-exclude a NetSapiens user from auto-provision (case-insensitive), e.g. `SHARED,SHARED VOICEMAIL,FAX`. |
 | `RINGOTEL_EXCLUDE_EXTS` | empty | CSV of specific extensions to soft-exclude from auto-provision. |
-| `RINGOTEL_EXCLUDE_EXTS_BY_DOMAIN` | empty | Optional JSON object keyed by **full NetSapiens domain**, per-domain extension overrides: `{"demo.12345.service": {"add": ["100"], "remove": ["200"]}}`. |
+| `RINGOTEL_EXCLUDE_EXTS_BY_DOMAIN` | empty | Optional JSON object keyed by the **NetSapiens domain as stored**, per-domain extension overrides: `{"demo.12345.service": {"add": ["100"], "remove": ["200"]}}`. |
 
 **`RINGOTEL_EXCLUDE_NAMES` default gotcha:** the built-in default (`SHARED`, `SHARED VOICEMAIL`, `FAX`)
 only applies when the key is **absent from `env` entirely**. Cloudflare vars declared in `wrangler.jsonc`

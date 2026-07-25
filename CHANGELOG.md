@@ -19,6 +19,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   It opens by refusing to start: the SSO integration is configured by Ringotel support, so a procedure
   beginning with `pnpm install` sends someone down a path that cannot complete.
 
+### Fixed (documentation)
+
+- **`SETUP.md` no longer claims every NetSapiens domain carries a territory suffix.** Domain-valued
+  settings take the domain **exactly as your server stores it**, often — but not always — suffixed. Bare
+  domains (`example`, no suffix) are real and common on domains created before a reseller became a
+  white-label partner, and **a NetSapiens domain cannot be renamed afterwards**, so they persist. The old
+  wording told you to write the "full form with its territory suffix", which on such a server produces a
+  value that matches nothing, and separately claimed the label inside a `username` "will never equal" the
+  domain — on a bare-domain server it does. It still must not be *derived from* the username: when the two
+  match, that is a coincidence, not a rule.
+- **The endpoint URL is documented as yours to supply**, rather than something to discover from Ringotel.
+  You choose it for a new integration (`/authorize` by default) and hand it over with the Basic
+  credential; it is only an unknown when an integration already exists, and then the cheaper fix is adding
+  that path to `SSO_PATHS`. Also records that PRO can be enabled per organization and generally carries an
+  additional per-user cost.
+
 ## [0.2.1] - 2026-07-22
 
 ### Added
