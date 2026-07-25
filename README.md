@@ -57,6 +57,9 @@ support, not self-serve — including the request shape and the response mapping
 reply into a session. Nothing here can receive a request until that exists, so read
 [SETUP.md § Before you start](./SETUP.md#before-you-start-ringotel-side-prerequisites) first.
 
+If you are handing the deployment to a coding agent, point it at [AGENTS.md](./AGENTS.md) — it is the same
+procedure in the order it has to happen, with the questions it must ask you rather than guess.
+
 Then: clone, `pnpm install`, copy `.dev.vars.example` to `.dev.vars` and fill in the secrets, set the
 non-secret variables in `wrangler.jsonc`, and `pnpm dev` to run locally or `pnpm deploy` to ship it.
 Point Ringotel's SSO webhook at the Worker with the Basic credential you configured — at `/authorize`, or
@@ -86,6 +89,8 @@ portal and an SSO endpoint can quietly corrupt each other's work.
 
 ## Docs
 
+- [AGENTS.md](./AGENTS.md) — deploying this Worker, written for a coding agent: the order of operations,
+  the decisions to bring to the operator, and what never to do.
 - [SETUP.md](./SETUP.md) — configuration reference and deployment steps.
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — the request pipeline, the verdict × mode decision table, what
   each intervention does, and the reasoning behind the design's less obvious choices.

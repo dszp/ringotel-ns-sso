@@ -5,6 +5,20 @@ All notable changes to `ringotel-ns-sso` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`AGENTS.md` — the deployment procedure, written for a coding agent.** Increasingly the person
+  deploying this Worker is delegating it to one, and `SETUP.md` is organised as a reference: an agent can
+  read every setting and still get the *order* wrong, which is the part that must not be improvised. The
+  new file carries the sequence, the five decisions it must bring to the operator rather than answer
+  itself, and the prohibitions that cost money or lock people out — with every setting's meaning left in
+  `SETUP.md` behind a link, so there is still one source of truth per fact.
+
+  It opens by refusing to start: the SSO integration is configured by Ringotel support, so a procedure
+  beginning with `pnpm install` sends someone down a path that cannot complete.
+
 ## [0.2.1] - 2026-07-22
 
 ### Added
