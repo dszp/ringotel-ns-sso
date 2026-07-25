@@ -3,6 +3,23 @@
 Configuration reference and deployment steps. This document maps every setting onto the actual keys read
 by [`src/config.ts`](./src/config.ts); see [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the design rationale.
 
+> ### 🤖 Recommended: let a coding agent drive this
+>
+> If you use Claude Code, Codex, Cursor, Copilot or similar, **point it at [AGENTS.md](./AGENTS.md)** and
+> have it deploy this for you. That file is this reference turned into an **ordered procedure**: it decides
+> nothing on your behalf, asks you the questions that need your answer (which domains may be written to,
+> whether activation emails are sent, which path Ringotel posts to), and refuses the mistakes that cost
+> money — provisioning creates billable app seats. Something like:
+>
+> ```
+> Read AGENTS.md in this repo and deploy this Worker for me. Ask me the questions it says to ask.
+> ```
+>
+> It starts where this deployment really starts: **the Ringotel-side integration below, which nobody can
+> self-serve** — so the agent will tell you to open that conversation before it runs a single command.
+> **This file stays the reference**; AGENTS.md links into it rather than repeating it. Prefer to do it
+> yourself? Everything is here; carry on below.
+
 All values below are **fictional placeholders** — `example.com`, `demo.12345.service`,
 `api.example.com`, `sso.example.com`. Every real value is operator-supplied config, never source.
 
