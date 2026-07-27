@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@dszp/netsapiens-lib':
-        specifier: ^0.1.5
-        version: 0.1.5
+        specifier: ^0.1.6
+        version: 0.1.6
       '@dszp/ringotel-lib':
         specifier: ^0.1.4
         version: 0.1.4
@@ -80,13 +80,14 @@ packages:
     resolution: {integrity: sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw==}
     engines: {node: '>=12'}
 
-  '@dszp/netsapiens-lib@0.1.5':
-    resolution: {integrity: sha512-tHkC4+3Jt8PypUrljpGz38TumcKOMB3OuxJFqq9T0tjCeN31y1QtoQhCnX8c2KhO6eKQ7/DoaBspOk4NYOWlnQ==}
+  '@dszp/netsapiens-lib@0.1.6':
+    resolution: {integrity: sha512-2NmZ7lAy7v91uLaOZaLEI7VbZvXbzn7P0/m4v2QIPHjiQMw53nieYqw2Rx+gStySmqZ9kH+w3qK3zOwHOXo7pg==}
     engines: {node: '>=20'}
 
   '@dszp/ringotel-lib@0.1.4':
     resolution: {integrity: sha512-jKJ5WzxGaSH/kzcFmvoWwME/LXkej/3rhunnNnj+lv/Wl57vz3s1dbSzAWE/lHrnpKrrmiMp5zoK7x1Xl8KoGA==}
     engines: {node: '>=20'}
+    deprecated: Superseded — please upgrade to >=0.1.6.
 
   '@emnapi/runtime@1.11.2':
     resolution: {integrity: sha512-kyOl3X0DuTiT1h2ft8r2fYO8JYtU9a9Xis/zBSiGArNaagCOWx90N1k2wxp18czFDH+OgcWGb5ZP/XMt3dcyPA==}
@@ -1039,7 +1040,7 @@ snapshots:
     dependencies:
       '@jridgewell/trace-mapping': 0.3.9
 
-  '@dszp/netsapiens-lib@0.1.5': {}
+  '@dszp/netsapiens-lib@0.1.6': {}
 
   '@dszp/ringotel-lib@0.1.4': {}
 

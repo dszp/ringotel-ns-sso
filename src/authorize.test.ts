@@ -158,7 +158,8 @@ describe('authorize', () => {
     const r = await authorize(input, d);
     expect(r.status).toBe(200);
     expect(updateDevice).not.toHaveBeenCalled();
-    expect(updateUser.mock.calls[0]?.[1] ?? updateUser.mock.calls[0]?.[2]).toBeDefined();
+    // …but heal still did its job: the canonical record was reactivated with the EXISTING password.
+    expect(updateUser).toHaveBeenCalledOnce();
   });
 
   it('denies provision when the NS user is ineligible (system user)', async () => {
