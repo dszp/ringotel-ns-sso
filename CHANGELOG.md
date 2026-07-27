@@ -5,6 +5,33 @@ All notable changes to `ringotel-ns-sso` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] — 2026-07-27
+
+### Changed
+
+- **A first-time provision now replaces the SIP password of a softphone device that already existed.**
+  Finding a `<ext><suffix>` device during provisioning means it came from somewhere else, and reusing its
+  stored password leaves whatever else holds it able to register as the same address-of-record. Both
+  clients then register, the most recent wins, and they trade the registration back and forth —
+  intermittent call failures with nothing obviously wrong in either system.
+
+  **Sign-in healing deliberately does not rotate.** Heal runs on every login, so rotating there would churn
+  the credential continuously and could race a re-registration. Rotation is also best-effort: if it fails —
+  including on a NetSapiens release without the device update endpoint — provisioning still succeeds using
+  the existing password, and the outcome is recorded in the log as `sipRotated` / `sipRotateError`.
+
+- **Device orchestration now comes from `@dszp/netsapiens-lib` (0.1.6) instead of a local copy.** This
+  worker and the portal backend both provision the same softphone device for the same extension, and two
+  hand-maintained implementations disagreeing about whether to reuse or replace a credential is exactly the
+  drift that caused sign-in failures before. One implementation, one set of tests.
+
+### Added
+
+- **The raw-request diagnostic (`SSO_DIAG_RAW`) is now part of the repository.** It was previously carried
+  as an out-of-tree patch, so the deployed worker did not match any commit. It is unchanged in behaviour —
+  flag-gated, off by default, evaluated after Basic auth, and it logs header *names* and body *keys* only,
+  never a value and never a credential.
+
 ## [Unreleased]
 
 ### Added
