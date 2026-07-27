@@ -93,6 +93,74 @@ describe('authorize', () => {
     expect(r.body?.authname).toBe('100r');
   });
 
+  it('provision ROTATES the SIP password when the <ext>r device already exists', async () => {
+    // A first-time provision that finds an existing device means the device came from somewhere else.
+    // Reusing its password would leave that other endpoint able to register as the same AOR, and the two
+    // would then trade the registration back and forth — a fault that looks like a phone problem.
+    const createUser = vi.fn(async (_args: Record<string, unknown>) => ({ id: 'NEW' }));
+    const updateDevice = vi.fn(async (_d: string, _u: string, _dev: string, changes: Record<string, unknown>) => ({ ...changes }));
+    const createDevice = vi.fn();
+    const read = { ...orgBranchReader, getUsers: async () => [] }; // verdict 'none' ⇒ provision
+    const ns = {
+      getDevices: async () => [{ device: '100r', 'device-sip-registration-password': 'STALE_PASSWORD' }],
+      getDevice: async () => ({ device: '100r', 'device-sip-registration-password': 'STALE_PASSWORD' }),
+      createDevice,
+      updateDevice,
+    };
+    const auth = { authenticate: async () => ({ ok: true, self: baseSelf }) };
+    const d = deps({ auth, read, getWrite: async () => ({ rt: { createUser, updateUser: vi.fn(), deleteUser: vi.fn() }, ns }) } as any,
+      env({ SSO_PROVISION_DOMAINS: 'demo.12345.service' }));
+    const r = await authorize(input, d);
+    expect(r.status).toBe(200);
+    expect(createDevice).not.toHaveBeenCalled();
+    expect(updateDevice).toHaveBeenCalledOnce();
+    const pushed = createUser.mock.calls[0]?.[0]?.password as string;
+    expect(pushed).not.toBe('STALE_PASSWORD');
+    expect(pushed).toMatch(/^[A-Za-z0-9]{20}$/);
+    expect(r.log).toMatchObject({ sipRotated: true });
+  });
+
+  it('provision survives a failed rotation by falling back to the existing password', async () => {
+    // A NetSapiens release without the device PUT must not break provisioning.
+    const createUser = vi.fn(async (_args: Record<string, unknown>) => ({ id: 'NEW' }));
+    const updateDevice = vi.fn(async () => { throw new Error('404 No Route Found'); });
+    const read = { ...orgBranchReader, getUsers: async () => [] };
+    const ns = {
+      getDevices: async () => [{ device: '100r', 'device-sip-registration-password': 'STALE_PASSWORD' }],
+      getDevice: async () => ({ device: '100r', 'device-sip-registration-password': 'STALE_PASSWORD' }),
+      createDevice: vi.fn(),
+      updateDevice,
+    };
+    const auth = { authenticate: async () => ({ ok: true, self: baseSelf }) };
+    const d = deps({ auth, read, getWrite: async () => ({ rt: { createUser, updateUser: vi.fn(), deleteUser: vi.fn() }, ns }) } as any,
+      env({ SSO_PROVISION_DOMAINS: 'demo.12345.service' }));
+    const r = await authorize(input, d);
+    expect(r.status).toBe(200);
+    expect(createUser.mock.calls[0]?.[0]?.password).toBe('STALE_PASSWORD');
+    expect(r.log).toMatchObject({ sipRotated: false });
+  });
+
+  it('heal does NOT rotate the SIP password — it runs on every login', async () => {
+    const updateUser = vi.fn(async () => ({ id: 'A' }));
+    const updateDevice = vi.fn();
+    const read = { ...orgBranchReader, getUsers: async () => [
+      { id: 'A', branchid: 'B1', extension: '100', status: -1, authname: '100r', username: '100r' },
+    ] };
+    const ns = {
+      getDevices: async () => [{ device: '100r', 'device-sip-registration-password': 'STALE_PASSWORD' }],
+      getDevice: async () => ({ device: '100r', 'device-sip-registration-password': 'STALE_PASSWORD' }),
+      createDevice: vi.fn(),
+      updateDevice,
+    };
+    const auth = { authenticate: async () => ({ ok: true, self: baseSelf }) };
+    const d = deps({ auth, read, getWrite: async () => ({ rt: { createUser: vi.fn(), updateUser, deleteUser: vi.fn() }, ns }) } as any,
+      env({ SSO_HEAL_DOMAINS: 'demo.12345.service' }));
+    const r = await authorize(input, d);
+    expect(r.status).toBe(200);
+    expect(updateDevice).not.toHaveBeenCalled();
+    expect(updateUser.mock.calls[0]?.[1] ?? updateUser.mock.calls[0]?.[2]).toBeDefined();
+  });
+
   it('denies provision when the NS user is ineligible (system user)', async () => {
     const read = { ...orgBranchReader, getUsers: async () => [] };
     const ns = { getDevices: async () => [], getDevice: async () => ({}), createDevice: vi.fn() };

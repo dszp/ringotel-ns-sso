@@ -1,5 +1,7 @@
 import { resolveCanonicalUser, type User, type Rec, type RingotelWriteClient } from '@dszp/ringotel-lib';
-import { evaluateEligibility, type EligUser } from '@dszp/netsapiens-lib';
+import { evaluateEligibility, type EligUser,
+  ensureNsDevice,
+} from '@dszp/netsapiens-lib';
 import type { Config } from './config.js';
 import { resolveOrgBranch, resolveNsDomainByRtDomain, type OrgBranch, type OrgBranchReader } from './orgBranch.js';
 import { parseLogin, loginCandidates, domainClaimMatches, logSafeAttempt } from './login.js';
@@ -8,7 +10,9 @@ import { domainInList, domainAllowed, extBlocked } from './config.js';
 import type { RepairTask } from './repair.js';
 
 /** NS device field carrying the auto-generated SIP registration password (v2). */
-export const SIP_PW_FIELD = 'device-sip-registration-password';
+// Device orchestration is SHARED with the sibling portal worker via the library — two hand-maintained copies of
+// "reuse or rotate the SIP credential" is exactly the drift that produced SSO bricks before.
+export { SIP_PW_FIELD } from '@dszp/netsapiens-lib';
 
 /**
  * `domain` is OPTIONAL and, when sent, is the **Ringotel organization domain** — the value the app's
@@ -31,6 +35,8 @@ interface WriteNs {
   getDevices(domain: string, user: string): Promise<Rec[]>;
   getDevice(domain: string, user: string, device: string): Promise<Rec>;
   createDevice(domain: string, user: string, device: string): Promise<Rec>;
+  /** Used only to rotate the SIP password in place on provision — never delete-and-recreate. */
+  updateDevice(domain: string, user: string, device: string, changes: Rec): Promise<Rec>;
 }
 
 export interface AuthorizeDeps {
@@ -125,19 +131,31 @@ function toEligUser(self: Rec, ext: string, email: string): EligUser {
   return { ext, srvCode: srvCode(self), email: email || undefined, names: nsEligibilityNames(self), deviceCount: undefined };
 }
 
-/** Ensure the NS softphone device exists; return its SIP password. */
-async function ensureDevice(ns: WriteNs, domain: string, ext: string, device: string, mayCreate = true): Promise<string> {
-  const devices = await ns.getDevices(domain, ext);
-  const existing = devices.find((d) => String(d.device ?? '') === device);
-  if (existing) {
-    const dev = await ns.getDevice(domain, ext, device);
-    return String(dev[SIP_PW_FIELD] ?? existing[SIP_PW_FIELD] ?? '');
-  }
-  // `mayCreate: false` is how a blocked extension still gets healed when healing needs no new device:
-  // an empty return propagates to the caller's existing blank-password guard, which denies.
-  if (!mayCreate) return '';
-  const created = await ns.createDevice(domain, ext, device);
-  return String(created[SIP_PW_FIELD] ?? '');
+/**
+ * Ensure the NS softphone device exists; return its SIP password and whether it was rotated.
+ *
+ * Delegates to the library so this and the sibling portal worker cannot drift.
+ *
+ * `rotate` replaces the password of a device that ALREADY existed, which matters because reusing the
+ * stored one leaves any *other* endpoint still holding it able to register as the same AOR — the two then
+ * trade the registration back and forth, which looks like a phone fault rather than a provisioning one.
+ * Use it ONLY on provision (a first-time claim on the extension). **Heal must not rotate**: it runs on
+ * every login, so rotating there would churn the credential and could race a re-registration.
+ */
+async function ensureDevice(
+  ns: WriteNs,
+  domain: string,
+  ext: string,
+  device: string,
+  mayCreate = true,
+  rotate = false,
+): Promise<{ password: string; rotated?: boolean; rotateError?: string }> {
+  const r = await ensureNsDevice(ns, { domain, user: ext, device, mayCreate, rotateExisting: rotate });
+  return {
+    password: r.password,
+    ...(r.rotated !== undefined ? { rotated: r.rotated } : {}),
+    ...(r.rotateError !== undefined ? { rotateError: r.rotateError } : {}),
+  };
 }
 
 /**
@@ -445,7 +463,8 @@ export async function authorize(input: AuthorizeInput, deps: AuthorizeDeps): Pro
     }
 
     const { rt, ns } = await getWrite();
-    const password = await ensureDevice(ns, domain, ext, device, !blockedExt);
+    // Heal runs on EVERY login — deliberately no rotation here.
+    const { password } = await ensureDevice(ns, domain, ext, device, !blockedExt, false);
     // (M1) Never write a blank SIP password into Ringotel: on heal this would overwrite a working
     // password on the canonical record with an empty one. Fail closed BEFORE any Ringotel write.
     // For a blocked extension the blank also means "the device is missing and we refused to create it".
@@ -491,7 +510,10 @@ export async function authorize(input: AuthorizeInput, deps: AuthorizeDeps): Pro
   // provision (create) — name/email come from `self`, not an admin-token NS read.
   {
     const { rt, ns } = await getWrite();
-    const password = await ensureDevice(ns, domain, ext, device);
+    // Provision is a first-time claim on this extension, so if a `<ext><suffix>` device already exists it
+    // came from somewhere else — rotate so whatever still holds the old credential stops registering.
+    const { password, rotated, rotateError } = await ensureDevice(ns, domain, ext, device, true, true);
+    if (rotated !== undefined) Object.assign(log, { sipRotated: rotated, ...(rotateError ? { sipRotateError: rotateError } : {}) });
     // (M1) Same blank-password guard as heal, before any Ringotel write.
     if (!password) return { status: 403, log: { ...log, outcome: 'deny', reason: 'no-sip-password' } };
     await rt.createUser({

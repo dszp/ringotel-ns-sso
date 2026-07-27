@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@dszp/netsapiens-lib": "^0.1.5",
+    "@dszp/netsapiens-lib": "^0.1.6",
     "@dszp/ringotel-lib": "^0.1.4"
   },
   "devDependencies": {

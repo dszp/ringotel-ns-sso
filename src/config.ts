@@ -155,6 +155,14 @@ export interface Env {
    * by design, a non-enforcing binding is completely silent — no error, no warning, no limiting.
    */
   SSO_RATE_LIMITER?: { limit(opts: { key: string }): Promise<{ success: boolean }> };
+  /**
+   * TEMPORARY diagnostic switch. When truthy, the Worker logs the SHAPE of each incoming request — the
+   * body's key names, the type of `domain`, and the request's header names — so an integrator can see
+   * whether the vendor's tenant hint is actually arriving, and under which field name. Never logs a
+   * secret: the password is omitted entirely, the username is shaped log-safe, and only a string
+   * `domain` value is echoed. Absent/unset ⇒ off. Intended to be turned on briefly and then removed.
+   */
+  SSO_DIAG_RAW?: string;
 }
 
 export type WriteIdentity = { kind: 'api'; token: string } | { kind: 'admin'; user: string; pass: string };

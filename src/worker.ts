@@ -1,5 +1,6 @@
 import { parseConfig, type Env } from './config.js';
 import { authorize } from './authorize.js';
+import { logSafeAttempt } from './login.js';
 import { buildDeps } from './clients.js';
 import { runDeviceRepair } from './repair.js';
 import type { CacheLike } from './orgCache.js';
@@ -55,6 +56,28 @@ export default {
     try { input = (await request.json()) as typeof input; } catch {
       console.log(JSON.stringify({ outcome: 'deny', reason: 'malformed-body' }));
       return new Response('forbidden', { status: 403 });
+    }
+    // TEMPORARY diagnostic (SSO_DIAG_RAW). We only ever read `input.domain`, so if the vendor sends the
+    // tenant hint under a different key we would never see it and the log would say "not supplied" while
+    // it was in fact supplied elsewhere. This records the body's KEY NAMES and the header names — never a
+    // value that could be secret: the password is omitted, the username is shaped log-safe, and only a
+    // string `domain` is echoed (it is a tenant identifier, not a credential). Remove once settled.
+    if (env.SSO_DIAG_RAW) {
+      const b = input && typeof input === 'object' ? (input as Record<string, unknown>) : {};
+      const headerNames: string[] = [];
+      request.headers.forEach((_v, k) => {
+        if (k !== 'authorization') headerNames.push(k);
+      });
+      console.log(
+        JSON.stringify({
+          diag: 'raw-request',
+          bodyKeys: Object.keys(b),
+          domainType: typeof b.domain,
+          domain: typeof b.domain === 'string' ? b.domain : null,
+          username: logSafeAttempt(typeof b.username === 'string' ? b.username : ''),
+          headerNames,
+        }),
+      );
     }
     // (M7) Validate field TYPES explicitly rather than relying on a thrown exception downstream (e.g. a
     // numeric/object `domain` reaching `.toLowerCase()`/`.trim()` calls in authorize.ts/orgBranch.ts).
