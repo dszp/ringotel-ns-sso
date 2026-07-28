@@ -48,7 +48,7 @@ guess here is not a small mistake.
 
 | Ask | Why you must not decide it |
 |---|---|
-| Which domains may **heal**, **provision**, **repair**? | These write to Ringotel and to the phone system. **Provisioning creates billable Ringotel seats, and creates NetSapiens devices for an extension, which may also affect billing.** Off unless named. |
+| Which domains may **heal**, **provision**, **repair**? | These write to Ringotel and to the phone system. **Provisioning creates billable Ringotel seats, and creates NetSapiens devices for an extension, which may also affect billing.** Off unless named. It also **replaces the SIP password of a `<ext><suffix>` device that already existed** — correct, since reusing it would let two clients register as the same address-of-record and trade the registration back and forth, but anything else still holding that password stops registering. Say so before enabling it where softphone devices were created by hand. |
 | Send Ringotel's activation email? | An SSO user is already inside the app and never needs the emailed password — but a deployment where people *also* sign in directly does need it. |
 | Must a user have an email address to be auto-provisioned? | Some operators use "no address on file" as a deliberate marker for staff who get no app account. |
 | Which extensions and which domains are blocked outright? | Shared, park, fax and infrastructure extensions should never get an app account, and a DID-holding or internal domain should not be signing in at all. |
@@ -165,3 +165,8 @@ or a domain-valued setting does not match what the server actually stores — ty
 where the full domain is stored, or the Ringotel organization name written in place of either. Check the log
 line's `reason` first — it names the refusal — then the setting behind it in
 [SETUP.md](./SETUP.md#vars-wranglerjsonc). Do not work around a refusal by widening an allowlist.
+
+**If the request itself is the mystery** — you cannot tell what the vendor is actually sending, or whether
+a tenant hint arrives under a name nobody expected — set `SSO_DIAG_RAW` briefly. It logs the *shape* of each
+inbound request (body key names, header names; never a value, never the password), which answers "what is
+in this payload" without guesswork. Turn it off once you have the answer.

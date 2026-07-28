@@ -282,6 +282,7 @@ genuinely different policy per customer has to run more than one Worker, at leas
 | `SSO_PATHS` | empty (`/authorize`) | Comma-separated request paths this Worker answers `POST` on. Ringotel's SSO service definition holds whatever endpoint URL was configured for **your** integration — often not `/authorize` (e.g. a proxy's `/webhook/<id>`), and changing it is a vendor-side support request. Accepting a **list** lets one deploy answer on the old and new paths at once, so moving traffic (e.g. retiring a proxy in front of this Worker) is a DNS change with an instant rollback rather than a flag day. Leading slashes and surrounding whitespace are normalised; a blank value falls back to `/authorize` rather than answering on nothing. `GET /health` is served regardless. |
 | `SSO_LOGIN_FORM` | `auto` | How a username backfilled from an organization domain is spelled: `auto` tries `<ext>@<first label>` and falls back to `<ext>@<full NetSapiens domain>`; `short` and `full` pin one. Only consulted when the user typed a **bare extension** — a username that already carries a domain is used verbatim. Pin it if you know which form your core stores: each wrong spelling is a failed password grant, and failed grants count against NetSapiens lockout policy. An unrecognised value is a startup error. |
 | `SSO_RT_DOMAIN_MAP` | empty | JSON overrides mapping a **Ringotel organization domain** to a **full NetSapiens domain**: `{"acmevoice": "acme.12345.service"}`. Checked before the live lookup, which normally answers from Ringotel's own data (an org whose `domain` matches, and the `address` on its branch). Use it for the two cases the lookup cannot serve: a branch whose domain differs from its org's (finding it would mean sweeping every org's branches on an unauthenticated request), and an organization domain that legitimately answers for more than one branch address, where the lookup refuses rather than guessing. Keys are case-insensitive. This is the **reverse** of `SSO_DOMAIN_MAP`. |
+| `SSO_DIAG_RAW` | empty (off) | Diagnostic. When truthy, logs the **shape** of each inbound request — the body's key names, the type of `domain`, and the request's header names — so you can see whether your integration sends a tenant hint at all, and under what name. Never logs a value that could be secret: the password is omitted entirely and the username is shaped log-safe. Evaluated after Basic auth. Turn it on briefly to answer a question, then turn it off. |
 | `SSO_ORG_CACHE_TTL` | `60` | Seconds to cache the Ringotel **organization list** in the Cloudflare Cache API; `0` disables it. Resolving a bare extension reads that list *before* the caller's NetSapiens credentials are checked, so without a cache a flood of failing logins drives one `getOrganizations` each onto the Ringotel AdminAPI — and a throttled API key fails **every** login, not just the abusive ones. The cost is staleness: for up to this long an org created moments ago is invisible, so a login for a brand-new customer can fail and then succeed. Branch and user reads are never cached — a branch carries the `address` that binds a tenant, which is the value least worth serving stale. The cache key is namespaced by a hash of your API token (never the token itself), so two Workers on one zone cannot read each other's fleet. A non-numeric or negative value is a startup error rather than a silent fallback. |
 | `SSO_SEND_ACTIVATION_EMAIL` | empty (**off**) | Whether an SSO-initiated activation sends Ringotel's credentials email. **Default: off.** A user who arrived via SSO authenticated with their NetSapiens credentials and is already inside the app, so the emailed app password is noise. Truthy (`1`/`true`/`yes`/`on`) turns it on — useful where users also sign in directly, or where the emailed QR code is the intended onboarding path. Drives Ringotel's `noemail` flag (inverted): the credentials email fires when a write carries **both** `status: 1` and an `email` field, which every heal/provision write here does, since it also syncs the NetSapiens name/email into the directory entry. |
 | `SSO_REQUIRE_EMAIL` | `auto` | Whether auto-provisioning requires the NetSapiens user to have an email address: `auto` \| `always` \| `never`. The rule exists because activation traditionally emails the credentials, so `auto` ties it to its own reason — an address is required exactly when `SSO_SEND_ACTIVATION_EMAIL` means one will be used. With the email suppressed (the default), a user without an address provisions normally. `always` keeps the requirement regardless, which is useful where a missing address is a deliberate marker for staff who should not get an app login. `never` drops it. **Only affects creation** — an existing user signs in, and is healed if inactive, either way. An unrecognised value is a startup error rather than a guess. **Deployment-wide only — there is currently no per-domain override for this setting**, unlike the heal/provision/repair allow/block pairs. If you need "no email = no app login" for some domains but not others, that isn't expressible yet. |
@@ -409,6 +410,21 @@ so it is indifferent to who calls it.
 
 
 
+## Provisioning replaces an existing device's SIP password
+
+When provisioning finds a `<ext><suffix>` device that **already existed**, it replaces that device's SIP
+password rather than reusing it. Finding one means it came from somewhere else, and reusing its stored
+password would leave whatever else holds that credential able to register as the same address-of-record:
+both clients register, the most recent wins, and they trade the registration back and forth — intermittent
+call failures with nothing obviously wrong in either system. **Tell your users before enabling provisioning
+on a domain where softphone devices were created by hand**, because anything still using the old password
+stops registering.
+
+**Sign-in healing deliberately does not rotate.** Heal runs on every login, so rotating there would churn
+the credential continuously and could race a re-registration. Rotation is also **best-effort**: if it fails
+— including on a NetSapiens release without the device update endpoint — provisioning still succeeds using
+the existing password, and the outcome is recorded as `sipRotated` / `sipRotateError` in the log line.
+
 ## What ends up in the logs
 
 Each request emits one structured JSON line (Workers Logs, 7-day retention). The useful fields:
@@ -422,6 +438,7 @@ Each request emits one structured JSON line (Workers Logs, 7-day retention). The
 | `verdict` / `action` / `mode` | Ringotel record state, what was done about it, and what the domain's policy permits |
 | `domainCheck` | how the caller's `domain` claim was settled |
 | `loginForm` / `loginUsed` | which username spelling was used |
+| `sipRotated` / `sipRotateError` | whether a first-time provision replaced the SIP password of a device that already existed, or why it could not |
 
 **`attempt` is shape-checked before it is recorded.** The username field is where people occasionally
 type their *password* by mistake, and a password written into a searchable log store is a worse outcome
