@@ -25,6 +25,7 @@
     "RINGOTEL_EXCLUDE_NAMES": "",       // blank ⇒ defaults SHARED,SHARED VOICEMAIL,FAX
     "RINGOTEL_EXCLUDE_EXTS": "",
     "RINGOTEL_EXCLUDE_EXTS_BY_DOMAIN": "",
+    "RINGOTEL_UNLISTED_USERS": "",  // soft (default) | ignore — users hidden from the NS directory
     "SSO_DOMAIN_MAP": ""        // optional JSON: NS-first-label → Ringotel org key overrides
   }
 }

@@ -143,6 +143,20 @@ export interface Env {
   RINGOTEL_EXCLUDE_EXTS?: string;
   RINGOTEL_EXCLUDE_EXTS_BY_DOMAIN?: string;
   /**
+   * How to treat a NetSapiens user who is hidden from the domain directory
+   * (`directory-name-visible-in-list-enabled: "no"`): `soft` (default) | `ignore`.
+   *
+   * Hiding someone from the directory is an operator saying "this is not a person you look up", which
+   * is the same statement the name and extension exclusions encode — so by default it is a SOFT
+   * exclusion: auto-provisioning is refused, an existing record still signs in and is still healed.
+   * `ignore` drops the rule for deployments that hide real staff from the directory for privacy and
+   * still want them to get an app.
+   *
+   * An unrecognised value is a startup error rather than a silent fallback: a typo here would quietly
+   * change who gets an app account on first login.
+   */
+  RINGOTEL_UNLISTED_USERS?: string;
+  /**
    * OPTIONAL Cloudflare Workers Rate Limiting binding, keyed per-account (`domain:username`) rather
    * than per-IP — callers are Ringotel's (or a proxy's) servers, so a handful of source IPs carry
    * every account's traffic; a per-IP limit would throttle all users collectively instead of stopping
@@ -309,7 +323,20 @@ export function domainInList(list: string[] | '*', domain: string): boolean {
   return list === '*' ? true : list.includes(domain.toLowerCase());
 }
 
-const SOFT_CATS: readonly SoftCategory[] = ['names', 'exts', 'no_devices'];
+// The full set of reseller-overridable soft categories, kept in step with the library's `SoftCategory`
+// and with the companion portal's `RINGOTEL_RESELLER_OVERRIDE` parser (where `all` expands to exactly
+// this list, so adding a category cannot silently narrow an existing `all` config). This Worker parses
+// no such setting — see `resellerOverride` below for why its set is always empty.
+const SOFT_CATS: readonly SoftCategory[] = ['names', 'exts', 'no_devices', 'unlisted'];
+
+/** `soft` (default) | `ignore`. Anything else is a hard config error — a typo would silently change
+ *  whether directory-hidden users get an app account, so it fails closed at parse time. */
+function parseUnlistedUsers(v?: string): 'soft' | 'ignore' {
+  const t = (v ?? '').trim().toLowerCase();
+  if (!t) return 'soft';
+  if (t === 'soft' || t === 'ignore') return t;
+  throw new ConfigError(`RINGOTEL_UNLISTED_USERS must be one of soft|ignore (got "${v}")`);
+}
 
 export function parseEligibility(env: Env): EligibilityConfig {
   // Seeded soft-exclusion name matchers. SUBSTRING, case-insensitive — so 'GENERAL' already covers
@@ -330,6 +357,7 @@ export function parseEligibility(env: Env): EligibilityConfig {
     excludeNames,
     excludeExts: csv(env.RINGOTEL_EXCLUDE_EXTS),
     excludeExtsByDomain,
+    unlistedUsers: parseUnlistedUsers(env.RINGOTEL_UNLISTED_USERS),
     // Always false. The library's no-device rule only NARROWS the name exclusion, and only when a
     // device count is supplied — this Worker deliberately never fetches one (it would cost an
     // admin-identity call per login purely to feed a heuristic), so the setting could not do anything.

@@ -125,10 +125,41 @@ function nsEligibilityNames(u: Rec): string[] {
   return [nsFirstName(u), nsLastName(u), nsDisplayName(u)].filter(Boolean);
 }
 
+/**
+ * Does the NetSapiens directory list this user? THREE-state: `true`, `false`, or `undefined` for "the
+ * record did not say". The v2 self-record spells it `directory-name-visible-in-list-enabled` and the v1
+ * shape `dir_list`; both carry the string `"yes"` / `"no"`, not a boolean.
+ *
+ * Anything else — absent, blank, or a spelling this code has not seen — yields `undefined`, which the
+ * eligibility engine treats as "rule does not fire". Unknown must not collapse to `false`: reading a
+ * missing field as "hidden" would refuse auto-provisioning for every user on a core that omits it, all
+ * at once, and the failure would look like a licensing or credential problem rather than a parse one.
+ */
+function nsListedInDirectory(u: Rec): boolean | undefined {
+  const raw = str(u['directory-name-visible-in-list-enabled'] ?? u['dir_list']).toLowerCase();
+  if (raw === 'yes') return true;
+  if (raw === 'no') return false;
+  return undefined;
+}
+
 /** Build the `EligUser` eligibility input from the NS self-record, shared by the provision-create
- *  eligibility check and the heal-time HARD gate (M8) so they can't diverge either. */
-function toEligUser(self: Rec, ext: string, email: string): EligUser {
-  return { ext, srvCode: srvCode(self), email: email || undefined, names: nsEligibilityNames(self), deviceCount: undefined };
+ *  eligibility check and the heal-time HARD gate (M8) so they can't diverge either.
+ *
+ *  Exported for tests: the directory flag's three-state reading is the part worth pinning directly,
+ *  since two of its three states are indistinguishable from the outside of an authorize() call. */
+export function toEligUser(self: Rec, ext: string, email: string): EligUser {
+  const listed = nsListedInDirectory(self);
+  return {
+    ext,
+    srvCode: srvCode(self),
+    email: email || undefined,
+    names: nsEligibilityNames(self),
+    deviceCount: undefined,
+    // Spread, not `listedInDirectory: listed`: an explicit `undefined` would still be an OWN property,
+    // so a consumer asking whether the field is present (as the tests do) could not tell "unknown"
+    // from "read and absent".
+    ...(listed !== undefined ? { listedInDirectory: listed } : {}),
+  };
 }
 
 /**

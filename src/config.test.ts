@@ -103,6 +103,25 @@ describe('parseConfig', () => {
     });
   });
 
+  describe('RINGOTEL_UNLISTED_USERS', () => {
+    it("defaults to 'soft' — a user hidden from the directory is soft-excluded", () => {
+      expect(parseConfig({ ...base }).eligibility.unlistedUsers).toBe('soft');
+    });
+
+    it("accepts 'ignore', case-insensitively", () => {
+      expect(parseConfig({ ...base, RINGOTEL_UNLISTED_USERS: 'IGNORE' }).eligibility.unlistedUsers).toBe('ignore');
+    });
+
+    it("accepts an explicit 'soft'", () => {
+      expect(parseConfig({ ...base, RINGOTEL_UNLISTED_USERS: 'soft' }).eligibility.unlistedUsers).toBe('soft');
+    });
+
+    it('REJECTS an unknown value rather than guessing', () => {
+      expect(() => parseConfig({ ...base, RINGOTEL_UNLISTED_USERS: 'off' })).toThrow(ConfigError);
+      expect(() => parseConfig({ ...base, RINGOTEL_UNLISTED_USERS: 'off' })).toThrow(/soft\|ignore/);
+    });
+  });
+
   it('resellerOverride is always empty — an SSO login has no reseller to be', () => {
     const c = parseConfig({ ...base });
     expect(c.eligibility.resellerOverride.size).toBe(0);

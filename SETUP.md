@@ -296,6 +296,7 @@ genuinely different policy per customer has to run more than one Worker, at leas
 | `RINGOTEL_EXCLUDE_NAMES` | *(see note)* | CSV of name substrings that soft-exclude a NetSapiens user from auto-provision (case-insensitive), e.g. `SHARED,SHARED VOICEMAIL,FAX`. |
 | `RINGOTEL_EXCLUDE_EXTS` | empty | CSV of specific extensions to soft-exclude from auto-provision. |
 | `RINGOTEL_EXCLUDE_EXTS_BY_DOMAIN` | empty | Optional JSON object keyed by the **NetSapiens domain as stored**, per-domain extension overrides: `{"demo.12345.service": {"add": ["100"], "remove": ["200"]}}`. |
+| `RINGOTEL_UNLISTED_USERS` | `soft` | How to treat a NetSapiens user hidden from the domain directory (`directory-name-visible-in-list-enabled: "no"`): `soft` \| `ignore`. Hiding someone from the directory is an operator saying *this is not a person you look up* — the same statement the name and extension exclusions encode — so by default it soft-excludes them from **auto-provisioning only**: an existing record still signs in, and is still healed. Set `ignore` if you hide real staff from the directory for privacy and still want them to get an app on first login. A user whose self-record does not carry the field at all is **not** treated as hidden. An unrecognised value is a startup error rather than a guess. |
 
 **`RINGOTEL_EXCLUDE_NAMES` default gotcha:** the built-in default (`SHARED`, `SHARED VOICEMAIL`, `FAX`)
 only applies when the key is **absent from `env` entirely**. Cloudflare vars declared in `wrangler.jsonc`

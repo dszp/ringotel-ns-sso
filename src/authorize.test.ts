@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { authorize, type AuthorizeDeps } from './authorize.js';
+import { authorize, toEligUser, type AuthorizeDeps } from './authorize.js';
 import { parseConfig, type Env } from './config.js';
 
 const env = (over: Partial<Env> = {}): Env => ({
@@ -683,6 +683,63 @@ describe('SSO_BLOCK_EXTS gates every device-creating path', () => {
     const e = env({ SSO_PROVISION_DOMAINS: '*', SSO_BLOCK_EXTS: '100',
                     SSO_BLOCK_EXTS_BY_DOMAIN: '{"demo.12345.service":{"remove":["100"]}}' });
     const r = await authorize(input, deps({ read: { ...orgBranchReader, getUsers: async () => [] }, ...W } as any, e));
+    expect(r.status).toBe(200);
+  });
+});
+
+describe('the directory flag (List in Directory)', () => {
+  const NS = { getDevices: async () => [], getDevice: async () => ({}), createDevice: async () => ({ 'device-sip-registration-password': 'sippw' }) } as any;
+  const emptyReader = { ...orgBranchReader, getUsers: async () => [] }; // verdict 'none' ⇒ provision path
+
+  /** Provision a brand-new user whose self-record carries `over`, under `envOver`. */
+  const run = (over: Record<string, unknown>, envOver: Partial<Env> = {}) => {
+    const createUser = vi.fn(async () => ({ id: 'NEW' }));
+    const auth = { authenticate: async () => ({ ok: true, self: { ...baseSelf, ...over } }) };
+    const p = authorize(input, deps(
+      { auth: auth as any, read: emptyReader, getWrite: async () => ({ rt: { createUser, updateUser: vi.fn(), deleteUser: vi.fn() } as any, ns: NS }) } as any,
+      env({ SSO_PROVISION_DOMAINS: '*', ...envOver })));
+    return p.then((r) => ({ r, createUser }));
+  };
+
+  describe('toEligUser reads it as three-state', () => {
+    it('"yes" ⇒ listed', () => {
+      expect(toEligUser({ 'directory-name-visible-in-list-enabled': 'yes' }, '100', '').listedInDirectory).toBe(true);
+    });
+
+    it('"no" ⇒ not listed', () => {
+      expect(toEligUser({ 'directory-name-visible-in-list-enabled': 'no' }, '100', '').listedInDirectory).toBe(false);
+    });
+
+    it('the v1 `dir_list` spelling is read too', () => {
+      expect(toEligUser({ dir_list: 'no' }, '100', '').listedInDirectory).toBe(false);
+    });
+
+    // Unknown is NOT false: a self-record that never carried the field must not be read as hidden, or
+    // every user on a core that omits it would be refused provisioning at once.
+    it('absent ⇒ omitted entirely, not false', () => {
+      expect('listedInDirectory' in toEligUser({}, '100', '')).toBe(false);
+    });
+
+    it('an unrecognised value ⇒ omitted, not guessed', () => {
+      expect('listedInDirectory' in toEligUser({ 'directory-name-visible-in-list-enabled': 'maybe' }, '100', '')).toBe(false);
+    });
+  });
+
+  it('a user hidden from the directory is NOT auto-provisioned (soft, by default)', async () => {
+    const { r, createUser } = await run({ 'directory-name-visible-in-list-enabled': 'no' });
+    expect(r.status).toBe(403);
+    expect(r.log.eligibility).toBe('soft');
+    expect(createUser).not.toHaveBeenCalled();
+  });
+
+  it('RINGOTEL_UNLISTED_USERS=ignore provisions them anyway', async () => {
+    const { r, createUser } = await run({ 'directory-name-visible-in-list-enabled': 'no' }, { RINGOTEL_UNLISTED_USERS: 'ignore' });
+    expect(r.status).toBe(200);
+    expect(createUser).toHaveBeenCalledOnce();
+  });
+
+  it('a listed user provisions normally', async () => {
+    const { r } = await run({ 'directory-name-visible-in-list-enabled': 'yes' });
     expect(r.status).toBe(200);
   });
 });

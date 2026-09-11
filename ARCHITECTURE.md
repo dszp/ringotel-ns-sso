@@ -111,7 +111,8 @@ In one line: **provision** = the record is absent, **heal** = the record is pres
 
 Triggered by verdict `none` on a provision-enabled domain, and it is the only path gated by
 **eligibility**: system/service users and non-3-4-digit extensions are never auto-created, and soft rules
-(shared-mailbox name patterns, per-domain exclusions) can exclude more. This is the only intervention
+(shared-mailbox name patterns, per-domain exclusions, and users hidden from the NetSapiens directory) can
+exclude more. This is the only intervention
 that can *increase what you are billed for*, which is why it is gated hardest. Note the email precondition is
 not a judgement about who deserves an app — it exists so activation has somewhere to send credentials, and
 `SSO_REQUIRE_EMAIL` defaults to enforcing it only when an email will actually be sent.
@@ -174,7 +175,9 @@ only pushes a credential to Ringotel. That is why they are gated separately —
 Eligibility (`evaluateEligibility`, from `@dszp/netsapiens-lib`) is only consulted for the `none` +
 `provision` cell — it gates *creation*, never reactivation or dedup. It's a HARD/SOFT rule engine: system
 users and non-3–4-digit extensions are never auto-created (hard); shared-mailbox name patterns, missing
-devices, and per-domain custom lists are soft-excludable and reseller-overridable per domain. A third tier,
+devices, per-domain custom lists, and users the NetSapiens directory hides
+(`directory-name-visible-in-list-enabled: "no"`, governed by `RINGOTEL_UNLISTED_USERS`) are
+soft-excludable and reseller-overridable per domain. A third tier,
 **precondition**, covers the requirement for an email address — present because activation traditionally
 emails the credentials. Since this Worker suppresses that email by default, `SSO_REQUIRE_EMAIL`
 (`auto` | `always` | `never`) ties the requirement to whether an email is actually being sent: `auto`

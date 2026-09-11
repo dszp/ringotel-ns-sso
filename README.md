@@ -24,7 +24,7 @@ Ringotel user exists at that extension at the moment Ringotel binds.** It guaran
 |---|---|
 | **validate** (default) | Allows a login only when a clean, active, SIP-linked user already exists. Never writes. |
 | **heal** (opt-in) | Also reactivates an inactive record and removes duplicates at the extension before allowing. |
-| **provision** (opt-in) | Also creates and activates a missing Ringotel user on first login, if the NetSapiens user passes an eligibility check (no system extensions, no shared mailboxes). |
+| **provision** (opt-in) | Also creates and activates a missing Ringotel user on first login, if the NetSapiens user passes an eligibility check (no system extensions, no shared mailboxes, and — unless you turn the rule off — nobody hidden from the domain directory). |
 | **repair** (opt-in) | For a login that needed no Ringotel change at all: recreates the *NetSapiens* softphone device if it has gone missing, **after** the response is sent, so it adds no latency. |
 
 Each is opted into per domain by an allowlist, paired with a blocklist that always wins — so a
