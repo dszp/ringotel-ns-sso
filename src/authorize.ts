@@ -134,9 +134,15 @@ function nsEligibilityNames(u: Rec): string[] {
  * eligibility engine treats as "rule does not fire". Unknown must not collapse to `false`: reading a
  * missing field as "hidden" would refuse auto-provisioning for every user on a core that omits it, all
  * at once, and the failure would look like a licensing or credential problem rather than a parse one.
+ *
+ * The fallback is `||` over the TRIMMED values, not `??` over the raw ones: a record carrying the v2 key
+ * as an empty string has not answered, so it must fall through to `dir_list` rather than consume the
+ * lookup. `??` only fires on null/undefined, so the blank would win and the real answer beside it would
+ * never be read. The companion portal's reader is spelled the same way, so the two cannot map one record
+ * to two verdicts.
  */
 function nsListedInDirectory(u: Rec): boolean | undefined {
-  const raw = str(u['directory-name-visible-in-list-enabled'] ?? u['dir_list']).toLowerCase();
+  const raw = (str(u['directory-name-visible-in-list-enabled']) || str(u['dir_list'])).toLowerCase();
   if (raw === 'yes') return true;
   if (raw === 'no') return false;
   return undefined;

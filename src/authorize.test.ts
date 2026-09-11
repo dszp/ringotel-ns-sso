@@ -716,6 +716,11 @@ describe('the directory flag (List in Directory)', () => {
 
     // Unknown is NOT false: a self-record that never carried the field must not be read as hidden, or
     // every user on a core that omits it would be refused provisioning at once.
+    // `??` would let the blank v2 key win and never read the v1 one beside it.
+    it('a present-but-BLANK v2 field falls through to `dir_list`', () => {
+      expect(toEligUser({ 'directory-name-visible-in-list-enabled': '', dir_list: 'no' }, '100', '').listedInDirectory).toBe(false);
+    });
+
     it('absent ⇒ omitted entirely, not false', () => {
       expect('listedInDirectory' in toEligUser({}, '100', '')).toBe(false);
     });
