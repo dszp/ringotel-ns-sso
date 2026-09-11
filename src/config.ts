@@ -311,7 +311,7 @@ export function domainInList(list: string[] | '*', domain: string): boolean {
 
 const SOFT_CATS: readonly SoftCategory[] = ['names', 'exts', 'no_devices'];
 
-function parseEligibility(env: Env): EligibilityConfig {
+export function parseEligibility(env: Env): EligibilityConfig {
   // Seeded soft-exclusion name matchers. SUBSTRING, case-insensitive — so 'GENERAL' already covers
   // bare 'VOICEMAIL' subsumes both 'SHARED VOICEMAIL' and 'GENERAL VOICEMAIL' — the longer forms are
   // kept to show that more specific matchers can be listed. Bare 'GENERAL' and bare 'CONF' are
