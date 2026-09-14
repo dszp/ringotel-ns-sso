@@ -7,6 +7,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Every refusal is attributable.** A login refused before the credential check — `misconfigured`,
+  `bad-body-fields`, `empty-credentials`, `rate-limited` — now records the same log-safe `attempt`
+  (`{ ext, domain }`, password never in any form) that `authorize` already records on the outcomes it
+  decides. On `misconfigured` the body is read for it only when the request carries the Basic secret,
+  which lives in its own bindings and survives a var-only misconfig. Motivated by a deploy that blanked
+  the config and refused every login for three days with no way to tell afterwards who had tried.
+
 ### Changed
 - The tracked `wrangler.jsonc` now sets `keep_vars: true`, so a deploy from the template uploads code
   and leaves the vars already live on the script in place instead of replacing them with blanks. The

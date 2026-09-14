@@ -89,6 +89,79 @@ describe('worker', () => {
     expect(res.status).toBe(403);
   });
 
+  describe('a refusal decided before authorize() still records WHO tried (log-safe attempt)', () => {
+    const lastLog = (log: ReturnType<typeof vi.spyOn>) => JSON.parse(String(log.mock.calls.at(-1)?.[0]));
+
+    it('misconfigured + valid Basic auth → the deny line carries attempt {ext, domain} and the domain claim, never the password', async () => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const res = await worker.fetch(authorizeReq(basic), { ...ENV, NS_SERVER: undefined }, ctx);
+        expect(res.status).toBe(403);
+        const line = lastLog(log);
+        expect(line).toMatchObject({ outcome: 'deny', reason: 'misconfigured', attempt: { ext: '100', domain: 'demo' }, domain: 'demo.12345.service' });
+        expect(JSON.stringify(line)).not.toContain('"x"');
+        expect(JSON.stringify(line)).not.toContain('password');
+      } finally { log.mockRestore(); }
+    });
+
+    it('misconfigured WITHOUT valid Basic auth → 403 and the deny line carries nothing from the body', async () => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const res = await worker.fetch(authorizeReq('Basic ' + btoa('x:y')), { ...ENV, NS_SERVER: undefined }, ctx);
+        expect(res.status).toBe(403);
+        const line = lastLog(log);
+        expect(line.reason).toBe('misconfigured');
+        expect(line.attempt).toBeUndefined();
+        expect(line.domain).toBeUndefined();
+      } finally { log.mockRestore(); }
+    });
+
+    it('misconfigured with even the Basic secret missing → still 403, still nothing from the body', async () => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const res = await worker.fetch(authorizeReq(basic), { ...ENV, NS_SERVER: undefined, SSO_BASIC_PASSWORD: undefined }, ctx);
+        expect(res.status).toBe(403);
+        expect(lastLog(log).attempt).toBeUndefined();
+      } finally { log.mockRestore(); }
+    });
+
+    it('a password-shaped username is not written even here', async () => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const req = new Request('https://w/authorize', {
+          method: 'POST', headers: { 'content-type': 'application/json', authorization: basic },
+          body: JSON.stringify({ username: 'Tr0ub4dor&3 secret!', password: 'x' }),
+        });
+        await worker.fetch(req, { ...ENV, NS_SERVER: undefined }, ctx);
+        const line = lastLog(log);
+        expect(line.attempt.ext).toMatch(/^other\(len=\d+\)$/);
+        expect(JSON.stringify(line)).not.toContain('Tr0ub4dor');
+      } finally { log.mockRestore(); }
+    });
+
+    it('rate-limited → the deny line carries the attempt', async () => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const limit = vi.fn(async () => ({ success: false }));
+        const res = await worker.fetch(authorizeReq(basic), { ...ENV, SSO_RATE_LIMITER: { limit } }, ctx);
+        expect(res.status).toBe(429);
+        expect(lastLog(log)).toMatchObject({ reason: 'rate-limited', attempt: { ext: '100', domain: 'demo' } });
+      } finally { log.mockRestore(); }
+    });
+
+    it('empty-credentials → the deny line carries the attempt', async () => {
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const req = new Request('https://w/authorize', {
+          method: 'POST', headers: { 'content-type': 'application/json', authorization: basic },
+          body: JSON.stringify({ username: '100@demo', password: '' }),
+        });
+        await worker.fetch(req, ENV, ctx);
+        expect(lastLog(log)).toMatchObject({ reason: 'empty-credentials', attempt: { ext: '100', domain: 'demo' } });
+      } finally { log.mockRestore(); }
+    });
+  });
+
   it('a body with only username+password (no `domain`, the real Ringotel shape) is NOT rejected by body validation', async () => {
     const noDomainReq = new Request('https://w/authorize', {
       method: 'POST',

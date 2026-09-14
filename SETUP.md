@@ -434,7 +434,7 @@ Each request emits one structured JSON line (Workers Logs, 7-day retention). The
 |---|---|
 | `outcome` | `allow` \| `deny` \| `error` |
 | `reason` | why a `deny` was refused — `bad-basic-auth`, `bad-credentials`, `domain-mismatch`, `no-domain-hint`, `unknown-org-domain`, `ambiguous-org-domain`, `domain-blocked`, `ext-blocked` |
-| `attempt` | what the caller TYPED: `{ ext, domain }` — present on every row, and the only identity a failed login has |
+| `attempt` | what the caller TYPED: `{ ext, domain }` — present on every row, including a refusal decided before the credentials are checked (`misconfigured`, `bad-body-fields`, `empty-credentials`, `rate-limited`), and the only identity a failed login has. On `misconfigured` it is recorded only when the request carried the Basic secret, so an unauthenticated caller cannot write to the log; the caller's `domain` claim rides beside it, shaped the same way. |
 | `ext` / `domain` | the authenticated user's real extension and NetSapiens domain, from their own self-record (successful auth only) |
 | `verdict` / `action` / `mode` | Ringotel record state, what was done about it, and what the domain's policy permits |
 | `domainCheck` | how the caller's `domain` claim was settled |

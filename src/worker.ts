@@ -25,6 +25,26 @@ function checkBasic(request: Request, user: string, pass: string): boolean {
   return safeEqual(decoded.slice(0, i), user) && safeEqual(decoded.slice(i + 1), pass);
 }
 
+/**
+ * The log-safe identity of a login attempt, for a refusal decided BEFORE `authorize` runs.
+ *
+ * `authorize` records `attempt` on every outcome it decides, so a bad password is attributable. The
+ * refusals above it — misconfigured, bad body, rate-limited — used to record nothing, and a deploy that
+ * blanked the config then refused every login for three days with no way to tell afterwards who had
+ * tried. Same shaping as `authorize` uses (`logSafeAttempt`): the extension and domain label only if they
+ * look like what they claim to be, never the password field in any form.
+ *
+ * `body` is whatever the request carried; anything that is not an object with a string `username`
+ * yields `{}`, so a caller cannot put arbitrary text in the log by sending it as the username.
+ */
+function attemptOf(body: unknown): { attempt?: ReturnType<typeof logSafeAttempt>; domain?: string } {
+  const b = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+  const out: { attempt?: ReturnType<typeof logSafeAttempt>; domain?: string } = {};
+  if (typeof b.username === 'string' && b.username.trim()) out.attempt = logSafeAttempt(b.username);
+  if (typeof b.domain === 'string' && b.domain.trim()) out.domain = logSafeAttempt(`x@${b.domain.trim()}`).domain;
+  return out;
+}
+
 const json = (status: number, body: unknown): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
@@ -40,7 +60,16 @@ export default {
     // configuration being valid.
     let config;
     try { config = parseConfig(env); } catch (e) {
-      console.log(JSON.stringify({ outcome: 'deny', reason: 'misconfigured', error: String((e as Error).message) }));
+      // Still attributable. The Basic secret lives in its own bindings and survives a var-only misconfig,
+      // so it can gate a best-effort read of the body: only a caller holding the shared secret gets its
+      // attempt written to the log, and only the shaped identity is written (`attemptOf`). Without the
+      // secret, or on a non-POST, nothing from the request is recorded — the same refusal, less detail.
+      let who: ReturnType<typeof attemptOf> = {};
+      const bu = env.SSO_BASIC_USER ?? '', bp = env.SSO_BASIC_PASSWORD ?? '';
+      if (request.method === 'POST' && bu && bp && checkBasic(request, bu, bp)) {
+        try { who = attemptOf(await request.json()); } catch { /* unreadable body: nothing to attribute */ }
+      }
+      console.log(JSON.stringify({ outcome: 'deny', reason: 'misconfigured', error: String((e as Error).message), ...who }));
       return new Response('forbidden', { status: 403 });
     }
 
@@ -88,15 +117,15 @@ export default {
     // still comes from the NS self-record, never from this field. So: present-and-non-string → 403;
     // absent/null/empty → valid, and `undefined` is what's passed through to `authorize`.
     if (typeof input.username !== 'string' || typeof input.password !== 'string') {
-      console.log(JSON.stringify({ outcome: 'deny', reason: 'bad-body-fields' }));
+      console.log(JSON.stringify({ outcome: 'deny', reason: 'bad-body-fields', ...attemptOf(input) }));
       return new Response('forbidden', { status: 403 });
     }
     if (input.domain != null && typeof input.domain !== 'string') {
-      console.log(JSON.stringify({ outcome: 'deny', reason: 'bad-body-fields' }));
+      console.log(JSON.stringify({ outcome: 'deny', reason: 'bad-body-fields', ...attemptOf(input) }));
       return new Response('forbidden', { status: 403 });
     }
     if (!input.username.trim() || !input.password) {
-      console.log(JSON.stringify({ outcome: 'deny', reason: 'empty-credentials' }));
+      console.log(JSON.stringify({ outcome: 'deny', reason: 'empty-credentials', ...attemptOf(input) }));
       return new Response('forbidden', { status: 403 });
     }
     // TRIMMED here, not just downstream: a whitespace-only value used to survive as truthy, which made
@@ -128,7 +157,7 @@ export default {
       try {
         const { success } = await env.SSO_RATE_LIMITER.limit({ key: rlKey });
         if (!success) {
-          console.log(JSON.stringify({ outcome: 'deny', reason: 'rate-limited', domain }));
+          console.log(JSON.stringify({ outcome: 'deny', reason: 'rate-limited', ...attemptOf(input) }));
           return new Response('too many requests', { status: 429 });
         }
       } catch (e) {
