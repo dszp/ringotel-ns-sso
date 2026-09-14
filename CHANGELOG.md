@@ -7,6 +7,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-09-14
+
 ### Added
 - **Every refusal is attributable.** A login refused before the credential check — `misconfigured`,
   `bad-body-fields`, `empty-credentials`, `rate-limited` — now records the same log-safe `attempt`
@@ -276,6 +278,7 @@ Initial release.
 - `SSO_REQUIRE_EMAIL` and `SSO_SEND_ACTIVATION_EMAIL` are deployment-wide; they have no per-domain
   override.
 
+[0.3.1]: https://github.com/dszp/ringotel-ns-sso/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/dszp/ringotel-ns-sso/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/dszp/ringotel-ns-sso/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/dszp/ringotel-ns-sso/compare/v0.1.3...v0.2.0
