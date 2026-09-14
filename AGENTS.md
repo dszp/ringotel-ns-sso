@@ -117,8 +117,10 @@ credential is in play, and secrets must exist before the first deploy or it goes
    ```bash
    wrangler deploy -c wrangler.local.jsonc
    ```
-   `pnpm deploy` deploys `wrangler.jsonc` — correct only if that file genuinely holds this deployment's
-   config, which for a clone of this repo it does not.
+   `pnpm run deploy:prod` is that same command. There is deliberately no script that deploys the tracked
+   `wrangler.jsonc`, and that file sets `keep_vars` so a deploy from it uploads code only and leaves the
+   vars already live on the script alone — but a fresh Worker has no live vars to keep, so it still fails
+   closed. Deploy the local config.
 
 5. **Tell the operator what to give Ringotel:** the Worker's URL on a path listed in `SSO_PATHS`, and the
    Basic credential. If Ringotel already posts somewhere else, that path can simply be added to

@@ -3,6 +3,9 @@
   "main": "src/worker.ts",
   "compatibility_date": "2026-01-01",
   "workers_dev": false,
+  // A deploy from THIS file uploads code only and keeps the vars already live on the script. The
+  // vars below are a template; the real ones live in a gitignored config passed with -c.
+  "keep_vars": true,
   "observability": { "enabled": true },
   "ratelimits": [{ "name": "SSO_RATE_LIMITER", "namespace_id": "2001", "simple": { "limit": 10, "period": 60 } }],
   "vars": {

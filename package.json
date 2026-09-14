@@ -8,7 +8,7 @@
   "packageManager": "pnpm@11.11.0",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy:prod": "wrangler deploy -c wrangler.local.jsonc",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

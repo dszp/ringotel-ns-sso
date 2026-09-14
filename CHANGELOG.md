@@ -5,6 +5,15 @@ All notable changes to `ringotel-ns-sso` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- The tracked `wrangler.jsonc` now sets `keep_vars: true`, so a deploy from the template uploads code
+  and leaves the vars already live on the script in place instead of replacing them with blanks. The
+  `deploy` script is replaced by `deploy:prod`, which deploys `wrangler.local.jsonc`. A plain
+  `wrangler deploy` of the template on 2026-09-10 blanked a live deployment's vars and every login was
+  refused as misconfigured until it was redeployed from the local config.
+
 ## [0.3.0] — 2026-09-10
 
 ### Added

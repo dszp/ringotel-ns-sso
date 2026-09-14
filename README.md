@@ -61,7 +61,8 @@ If you are handing the deployment to a coding agent, point it at [AGENTS.md](./A
 procedure in the order it has to happen, with the questions it must ask you rather than guess.
 
 Then: clone, `pnpm install`, copy `.dev.vars.example` to `.dev.vars` and fill in the secrets, set the
-non-secret variables in `wrangler.jsonc`, and `pnpm dev` to run locally or `pnpm deploy` to ship it.
+non-secret variables in a gitignored copy of `wrangler.jsonc` (say `wrangler.local.jsonc`), and `pnpm dev` to run
+locally or `pnpm run deploy:prod` to ship it.
 Point Ringotel's SSO webhook at the Worker with the Basic credential you configured — at `/authorize`, or
 at whatever path your integration already uses, since `SSO_PATHS` accepts a list and can answer on both
 at once. If the request template includes Ringotel's organization domain, your users can sign in with

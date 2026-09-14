@@ -321,8 +321,8 @@ verdict × mode table.
 ```bash
 pnpm install
 pnpm typecheck && pnpm test   # offline; zero setup required
-# set secrets (see above), fill in vars in wrangler.jsonc, then:
-pnpm deploy
+# set secrets (see above), copy wrangler.jsonc to wrangler.local.jsonc, fill in its vars, then:
+pnpm run deploy:prod
 ```
 
 ### Built-in per-account rate limit
