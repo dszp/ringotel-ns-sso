@@ -7,6 +7,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-11-24
+
+### Changed
+- **A typed username works in either spelling.** Under `SSO_LOGIN_FORM=auto`, a username that carries a
+  domain is still tried exactly as typed, and if that fails, the other spelling of the same login is
+  tried once: `1045@acme.12345.service` falls back to `1045@acme`, and `1045@acme` falls back to the
+  full form of the claimed organization's NetSapiens domain when its first label is `acme`. A core whose
+  users hold a mix of short and full login names no longer needs each user to know which they have.
+  `short` and `full` still pin a single attempt.
+
+### Dependencies
+- `@dszp/ringotel-lib` 0.1.4 → 0.1.9 and `wrangler` 4.158 → 4.166.
+- Dev tooling moved up a major each: TypeScript 7, Vitest 5 (with Vite 8, now a direct dev dependency
+  because Vitest 5 requires it as a peer), and `@cloudflare/workers-types` 5.
+
 ## [0.3.1] — 2026-09-14
 
 ### Added
@@ -278,6 +293,7 @@ Initial release.
 - `SSO_REQUIRE_EMAIL` and `SSO_SEND_ACTIVATION_EMAIL` are deployment-wide; they have no per-domain
   override.
 
+[0.4.0]: https://github.com/dszp/ringotel-ns-sso/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/dszp/ringotel-ns-sso/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/dszp/ringotel-ns-sso/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/dszp/ringotel-ns-sso/compare/v0.2.0...v0.2.1

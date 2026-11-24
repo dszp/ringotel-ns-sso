@@ -1,6 +1,6 @@
 {
   "name": "ringotel-ns-sso",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "Cloudflare Worker serving Ringotel SSO authenticate for NetSapiens orgs",
@@ -14,12 +14,13 @@
   },
   "dependencies": {
     "@dszp/netsapiens-lib": "^0.15.2",
-    "@dszp/ringotel-lib": "^0.1.4"
+    "@dszp/ringotel-lib": "^0.1.9"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20240000.0",
-    "typescript": "^5.5.0",
-    "vitest": "^2.0.0",
-    "wrangler": "^4.158.0"
+    "@cloudflare/workers-types": "^5.20261121.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.1",
+    "wrangler": "^4.166.0"
   }
 }
