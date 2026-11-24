@@ -5,7 +5,7 @@
  * domain is a Ringotel value — Ringotel does not know the NetSapiens domain and can never send it. So a
  * user may type either form of username:
  *
- *   `1045@acme`  — already carries the tenant; used verbatim, as it always has been
+ *   `1045@acme`  — already carries the tenant; tried as typed, then (under `auto`) once in its other spelling
  *   `1045`       — an extension alone, which identifies nobody until the org domain is resolved
  *
  * NetSapiens matches the stored unique `login-username`, which on every deployment observed is the SHORT

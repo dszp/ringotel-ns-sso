@@ -337,6 +337,56 @@ describe('authorize: bare extension + Ringotel org domain', () => {
   });
 });
 
+describe('authorize: a typed username works in either spelling', () => {
+  it('a SHORT username reaches a login stored in the FULL form', async () => {
+    const { auth, tried } = authAccepting('100@demo.12345.service');
+    const r = await authorize({ username: '100@demo', password: 'pw', domain: 'demovoice' }, deps({ auth } as any));
+    expect(r.status).toBe(200);
+    expect(tried).toEqual(['100@demo', '100@demo.12345.service']);
+    expect(r.log.loginUsed).toBe('100@demo.12345.service');
+  });
+
+  it('a FULL username reaches a login stored in the SHORT form, with no org lookup', async () => {
+    const { auth, tried } = authAccepting('100@demo');
+    const r = await authorize(
+      { username: '100@demo.12345.service', password: 'pw', domain: 'demovoice' },
+      deps({ auth } as any),
+    );
+    expect(r.status).toBe(200);
+    expect(tried).toEqual(['100@demo.12345.service', '100@demo']);
+  });
+
+  it('the typed spelling is tried first, and a match there spends nothing more', async () => {
+    const { auth, tried } = authAccepting('100@demo');
+    await authorize({ username: '100@demo', password: 'pw', domain: 'demovoice' }, deps({ auth } as any));
+    expect(tried).toEqual(['100@demo']);
+  });
+
+  it('never expands a label that is not the claimed tenant\'s', async () => {
+    const { auth, tried } = authAccepting('100@demo.12345.service');
+    const r = await authorize({ username: '100@other', password: 'pw', domain: 'demovoice' }, deps({ auth } as any));
+    expect(r.status).toBe(403);
+    expect(tried).toEqual(['100@other']);
+  });
+
+  it('a short username with no claimed domain gets one attempt only', async () => {
+    const { auth, tried } = authAccepting('100@demo.12345.service');
+    const r = await authorize({ username: '100@demo', password: 'pw' }, deps({ auth } as any));
+    expect(r.status).toBe(403);
+    expect(tried).toEqual(['100@demo']);
+  });
+
+  it('a pinned spelling keeps a typed username to one attempt', async () => {
+    const { auth, tried } = authAccepting('100@demo.12345.service');
+    const r = await authorize(
+      { username: '100@demo', password: 'pw', domain: 'demovoice' },
+      deps({ auth } as any, env({ SSO_LOGIN_FORM: 'short' })),
+    );
+    expect(r.status).toBe(403);
+    expect(tried).toEqual(['100@demo']);
+  });
+});
+
 describe('authorize: the domain claim is still a cross-tenant guard', () => {
   it('accepts the Ringotel org domain for a username that already carries its tenant', async () => {
     const r = await authorize({ username: '100@demo', password: 'pw', domain: 'demovoice' }, deps());

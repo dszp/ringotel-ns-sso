@@ -4,7 +4,7 @@ import { evaluateEligibility, type EligUser,
 } from '@dszp/netsapiens-lib';
 import type { Config } from './config.js';
 import { resolveOrgBranch, resolveNsDomainByRtDomain, type OrgBranch, type OrgBranchReader } from './orgBranch.js';
-import { parseLogin, loginCandidates, domainClaimMatches, logSafeAttempt } from './login.js';
+import { parseLogin, loginCandidates, domainClaimMatches, logSafeAttempt, firstLabel } from './login.js';
 import { modeFor, decide, healPermitted } from './decide.js';
 import { domainInList, domainAllowed, extBlocked } from './config.js';
 import type { RepairTask } from './repair.js';
@@ -248,6 +248,17 @@ export async function authorize(input: AuthorizeInput, deps: AuthorizeDeps): Pro
   // the strongest form of the cross-tenant check: not "these two strings look like the same tenant" but
   // "the tenant they named is the tenant they authenticated into".
   let claimedNsDomain: string | undefined;
+  // The Ringotel org domain the caller sent, resolved to a NetSapiens domain: SSO_RT_DOMAIN_MAP first,
+  // else the live org lookup. Own-property lookup on the map: a plain object would answer
+  // `constructor`/`toString` from the prototype chain, turning a caller-chosen word into a "mapping".
+  const resolveClaim = async (c: string): Promise<{ ok: true; nsDomain: string } | { ok: false; reason: string }> => {
+    const want = c.toLowerCase();
+    const mapped = Object.hasOwn(config.rtDomainMap, want) ? config.rtDomainMap[want] : undefined;
+    if (mapped) { log.rtDomainSource = 'map'; return { ok: true, nsDomain: mapped }; }
+    const found = await resolveNsDomainByRtDomain(read, want);
+    if (found.ok) log.rtDomainSource = 'lookup';
+    return found;
+  };
   if (parsed.label) {
     logins = [input.username.trim()];
     log.loginForm = 'verbatim';
@@ -255,25 +266,14 @@ export async function authorize(input: AuthorizeInput, deps: AuthorizeDeps): Pro
     // No tenant in the username and none supplied ⇒ refuse here, before spending an NS call. An
     // extension is not globally unique, so any guess would be a guess about whose account to open.
     if (!claim) return { status: 403, log: { ...log, outcome: 'deny', reason: 'no-domain-hint' } };
-    const want = claim.toLowerCase();
-    // Own-property lookup: a plain object would answer `constructor`/`toString` from the prototype
-    // chain, turning a caller-chosen word into a "mapping" that then skips the live lookup.
-    const mapped = Object.hasOwn(config.rtDomainMap, want) ? config.rtDomainMap[want] : undefined;
-    let nsDomain: string;
-    if (mapped) {
-      nsDomain = mapped;
-      log.rtDomainSource = 'map';
-    } else {
-      const found = await resolveNsDomainByRtDomain(read, want);
-      if (!found.ok) {
-        // Reported distinctly: 'ambiguous' means the Ringotel domain answers for more than one branch
-        // address, which SSO_RT_DOMAIN_MAP fixes; 'not-found' means no org carries that domain at all.
-        const reason = found.reason === 'ambiguous' ? 'ambiguous-org-domain' : 'unknown-org-domain';
-        return { status: 403, log: { ...log, outcome: 'deny', reason } };
-      }
-      nsDomain = found.nsDomain;
-      log.rtDomainSource = 'lookup';
+    const found = await resolveClaim(claim);
+    if (!found.ok) {
+      // Reported distinctly: 'ambiguous' means the Ringotel domain answers for more than one branch
+      // address, which SSO_RT_DOMAIN_MAP fixes; 'not-found' means no org carries that domain at all.
+      const reason = found.reason === 'ambiguous' ? 'ambiguous-org-domain' : 'unknown-org-domain';
+      return { status: 403, log: { ...log, outcome: 'deny', reason } };
     }
+    const nsDomain = found.nsDomain;
     log.resolvedNsDomain = nsDomain;
     claimedNsDomain = nsDomain;
     logins = loginCandidates(parsed.ext, nsDomain, config.loginForm);
@@ -291,6 +291,32 @@ export async function authorize(input: AuthorizeInput, deps: AuthorizeDeps): Pro
   for (const candidate of logins) {
     a = await deps.auth.authenticate(candidate, input.password);
     if (a.ok && a.self) { log.loginUsed = candidate; break; }
+  }
+  // A TYPED username gets one other spelling of the same login in `auto` mode, because cores in the field
+  // hold a mix of short (`1045@acme`) and full (`1045@acme.12345.service`) login names, and users should
+  // not have to know which one their record has. Tried only after the typed spelling fails, so a match
+  // costs nothing extra; a wrong password costs two grants, the same as the backfill path.
+  //  - typed FULL ⇒ the short form is derivable from what was typed; no lookup.
+  //  - typed SHORT ⇒ the full domain is not in the input, so it comes from the claimed org domain, and
+  //    only when that tenant's first label IS the typed label: a label is never expanded into a tenant
+  //    the caller did not name.
+  if ((!a.ok || !a.self) && parsed.label && config.loginForm === 'auto') {
+    let alt: string | undefined;
+    if (parsed.label.includes('.')) {
+      const short = `${parsed.ext}@${firstLabel(parsed.label)}`;
+      if (short !== logins[0]) alt = short;
+    } else if (claim) {
+      const found = await resolveClaim(claim);
+      if (found.ok && firstLabel(found.nsDomain).toLowerCase() === parsed.label.toLowerCase()) {
+        alt = `${parsed.ext}@${found.nsDomain}`;
+        log.resolvedNsDomain = found.nsDomain;
+        claimedNsDomain = found.nsDomain;
+      }
+    }
+    if (alt) {
+      a = await deps.auth.authenticate(alt, input.password);
+      if (a.ok && a.self) log.loginUsed = alt;
+    }
   }
   if (!a.ok || !a.self) return { status: 403, log: { ...log, outcome: 'deny', reason: 'bad-credentials' } };
   const self = a.self;
